@@ -387,7 +387,7 @@ namespace PearlCLR.JIT
             {
                 return LLVM.BuildFPCast(builder, val, type, "");
             }
-            throw new Exception();
+            throw new Exception($"{val.TypeOf().TypeKind} to {type.TypeKind}");
         }
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -487,6 +487,8 @@ namespace PearlCLR.JIT
             {
                 if (instruction.OpCode == OpCodes.Br_S ||
                     instruction.OpCode == OpCodes.Br ||
+                    instruction.OpCode == OpCodes.Brtrue||
+                    instruction.OpCode == OpCodes.Brfalse ||
                     instruction.OpCode == OpCodes.Brtrue_S ||
                     instruction.OpCode == OpCodes.Brfalse_S ||
                     instruction.OpCode == OpCodes.Beq ||
@@ -547,17 +549,6 @@ namespace PearlCLR.JIT
                 }
             }
 
-            void ProcessBranchComp(LLVMIntPredicate cmp, LLVMValueRef lval, LLVMValueRef rval, LLVMBasicBlockRef branchTrue, LLVMBasicBlockRef branchFalse)
-            {
-                if (!lval.TypeOf().Equals(rval.TypeOf()))
-                {
-                    rval = AutoCast(builder, rval, lval.TypeOf());
-                }
-                LLVM.BuildCondBr(builder,
-                    LLVM.BuildICmp(builder, cmp, lval, rval, ""),
-                    branchTrue, branchFalse);
-            }
-
             void ProcessInstructions(Instruction paramInstruction)
             {
                 var isFirst = true;
@@ -570,7 +561,6 @@ namespace PearlCLR.JIT
                     {
                         instruction = instruction.Next;
                     }
-                    //Debug($"DEBUG: {instruction.OpCode}");
 
                     if (instruction.OpCode == OpCodes.Ldarg_0)
                     {
@@ -1605,7 +1595,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Box)
                     {
-                        var operand = (TypeDefinition)instruction.Operand;
+                        var operand = (TypeReference)instruction.Operand;
                         Debug("[Box] -> Allocated as Reference {0}");
                         continue;
                     }
@@ -1712,20 +1702,113 @@ namespace PearlCLR.JIT
                                 new KeyValuePair<Instruction, LLVMBasicBlockRef>(instruction.Next, entryBlock));
                         }
                     }
+
+                    if (instruction.OpCode == OpCodes.Beq ||
+                        instruction.OpCode == OpCodes.Beq_S ||
+                        
+                        instruction.OpCode == OpCodes.Bge ||
+                        instruction.OpCode == OpCodes.Bge_S ||
+                        instruction.OpCode == OpCodes.Bge_Un ||
+                        instruction.OpCode == OpCodes.Bge_Un_S ||
+                        
+                        instruction.OpCode == OpCodes.Bgt ||
+                        instruction.OpCode == OpCodes.Bgt_S ||
+                        instruction.OpCode == OpCodes.Bgt_Un ||
+                        instruction.OpCode == OpCodes.Bgt_Un_S ||
+                        
+                        instruction.OpCode == OpCodes.Ble ||
+                        instruction.OpCode == OpCodes.Ble_S ||
+                        instruction.OpCode == OpCodes.Ble_Un ||
+                        instruction.OpCode == OpCodes.Ble_Un_S ||
+                        
+                        instruction.OpCode == OpCodes.Blt ||
+                        instruction.OpCode == OpCodes.Blt_S ||
+                        instruction.OpCode == OpCodes.Blt_Un ||
+                        instruction.OpCode == OpCodes.Blt_Un_S ||
+                        
+                        instruction.OpCode == OpCodes.Bne_Un ||
+                        instruction.OpCode == OpCodes.Bne_Un_S)
+                    {
+                        LLVMIntPredicate intCmp;
+
+                        if (instruction.OpCode == OpCodes.Beq ||
+                            instruction.OpCode == OpCodes.Beq_S)
+                            intCmp = LLVMIntPredicate.LLVMIntEQ;
+                        else if (instruction.OpCode == OpCodes.Bne_Un ||
+                                 instruction.OpCode == OpCodes.Bne_Un_S)
+                            intCmp = LLVMIntPredicate.LLVMIntNE;
+                        else if (instruction.OpCode == OpCodes.Bge ||
+                                 instruction.OpCode == OpCodes.Bge_S)
+                            intCmp = LLVMIntPredicate.LLVMIntSGE;
+                        else if (instruction.OpCode == OpCodes.Bge_Un ||
+                                 instruction.OpCode == OpCodes.Bge_Un_S)
+                            intCmp = LLVMIntPredicate.LLVMIntUGE;
+                        else if (instruction.OpCode == OpCodes.Bgt ||
+                                 instruction.OpCode == OpCodes.Bgt_S)
+                            intCmp = LLVMIntPredicate.LLVMIntSGT;
+                        else if (instruction.OpCode == OpCodes.Bgt_Un ||
+                                 instruction.OpCode == OpCodes.Bgt_Un_S)
+                            intCmp = LLVMIntPredicate.LLVMIntUGT;
+                        else if (instruction.OpCode == OpCodes.Ble ||
+                                 instruction.OpCode == OpCodes.Ble_S)
+                            intCmp = LLVMIntPredicate.LLVMIntSLE;
+                        else if (instruction.OpCode == OpCodes.Ble_Un ||
+                                 instruction.OpCode == OpCodes.Ble_Un_S)
+                            intCmp = LLVMIntPredicate.LLVMIntULE;
+                        else if (instruction.OpCode == OpCodes.Blt ||
+                                 instruction.OpCode == OpCodes.Blt_S)
+                            intCmp = LLVMIntPredicate.LLVMIntSLT;
+                        else if (instruction.OpCode == OpCodes.Blt_Un ||
+                                 instruction.OpCode == OpCodes.Blt_Un_S)
+                            intCmp = LLVMIntPredicate.LLVMIntULT;
+                        else
+                        {
+                            throw new BadImageFormatException();
+                        }
+                        
+                        var rval = builderStack.Pop();
+                        var lval = builderStack.Pop();
+                        var operand = (Instruction) instruction.Operand;
+                        var branchToBlock = branchTo[operand];
+                        entryBlock = LLVM.AppendBasicBlock(entryFunction, "branch");
+
+                        var cmp = LLVM.BuildICmp(builder, intCmp, lval.ValRef.Value,
+                            rval.ValRef.Value, instruction.OpCode.ToString());
+
+                        LLVM.BuildCondBr(builder,
+                            cmp,
+                            entryBlock, branchToBlock);
+                        
+                        if (branchTo.ContainsKey(instruction.Next))
+                            break;
+                        
+                        LLVM.PositionBuilderAtEnd(builder, entryBlock);
+                        AddBlockToProcess();
+
+                        Debug(
+                            $"[{instruction.OpCode} {operand}] -> Popped {lval} and {rval} and pushed {cmp} and branched to {branchTo}");
+                        continue;
+                    }
                     
                     
                     if (instruction.OpCode == OpCodes.Brfalse ||
-                        instruction.OpCode == OpCodes.Brfalse_S)
+                        instruction.OpCode == OpCodes.Brfalse_S ||
+                        instruction.OpCode == OpCodes.Brtrue ||
+                        instruction.OpCode == OpCodes.Brtrue_S)
                     {
                         var lval = builderStack.Pop();
                         var operand = (Instruction) instruction.Operand;
                         var branchToBlock = branchTo[operand];
                         entryBlock = LLVM.AppendBasicBlock(entryFunction, "branch");
-                        var rval = LLVM.ConstInt(lval.ValRef.Value.TypeOf(), 0, new LLVMBool(0));
+                        LLVMValueRef rval;
+                        if (instruction.OpCode == OpCodes.Brtrue ||
+                            instruction.OpCode == OpCodes.Brtrue_S)
+                            rval = LLVM.ConstInt(lval.ValRef.Value.TypeOf(), 1, new LLVMBool(0));
+                        else
+                            rval = LLVM.ConstInt(lval.ValRef.Value.TypeOf(), 0, new LLVMBool(0));
 
                         var cmp = LLVM.BuildICmp(builder, LLVMIntPredicate.LLVMIntEQ, lval.ValRef.Value,
-                            rval, "brfalse");
-                        //DebugPrint(builder, "brfalse: %s\n %u\n", LLVM.BuildGlobalStringPtr(builder, cmp.ToString(), ""), cmp);
+                            rval, instruction.OpCode.ToString());
 
                         LLVM.BuildCondBr(builder,
                             cmp,
@@ -1740,323 +1823,6 @@ namespace PearlCLR.JIT
 
                         Debug(
                             $"[{instruction.OpCode} {operand}] -> Created Branch");
-                        continue;
-                    }
-
-                    if (instruction.OpCode == OpCodes.Brtrue ||
-                        instruction.OpCode == OpCodes.Brtrue_S)
-                    {
-                        var lval = builderStack.Pop();
-                        var operand = (Instruction) instruction.Operand;
-                        var branchToBlock = branchTo[operand];
-                        entryBlock = LLVM.AppendBasicBlock(entryFunction, "branch");
-                        var rval = LLVM.ConstInt(lval.ValRef.Value.TypeOf(), 1, new LLVMBool(0));
-                        //DebugPrint(builder, "Pre brtrue: %u == %u\n", lval.ValRef.Value, rval);
-                        var cmp = LLVM.BuildICmp(builder, LLVMIntPredicate.LLVMIntEQ, lval.ValRef.Value,
-                            rval, "brtrue");
-                        //DebugPrint(builder, "brtrue: %s\n %u\n", LLVM.BuildGlobalStringPtr(builder, cmp.ToString(), ""), cmp);
-                        LLVM.BuildCondBr(builder,
-                            cmp,
-                            branchToBlock, entryBlock);
-                        if (branchTo.ContainsKey(instruction.Next))
-                            break;
-                        else
-                        {
-                            LLVM.PositionBuilderAtEnd(builder, entryBlock);
-                            AddBlockToProcess();
-                        }
-
-                        Debug(
-                            $"[{instruction.OpCode} {operand}] -> Created Branch");
-                        continue;
-                    }
-
-                    if (instruction.OpCode == OpCodes.Bne_Un ||
-                        instruction.OpCode == OpCodes.Bne_Un_S)
-                    {
-                        var lval = builderStack.Pop();
-                        var rval = builderStack.Pop();
-                        var comprval = rval.ValRef.Value;
-                        var operand = (Instruction) instruction.Operand;
-                        var branchToBlock = branchTo[operand];
-                        if (!rval.ValRef.Value.TypeOf().Equals(lval.ValRef.Value.TypeOf()))
-                        {
-                            comprval = AutoCast(builder, rval.ValRef.Value, lval.ValRef.Value.TypeOf());
-                        }
-
-                        entryBlock = LLVM.AppendBasicBlock(entryFunction, "branch");
-                        ProcessBranchComp(LLVMIntPredicate.LLVMIntNE, lval.ValRef.Value, comprval, branchToBlock, entryBlock);
-                        if (branchTo.ContainsKey(instruction.Next))
-                            break;
-                        else
-                        {
-                            LLVM.PositionBuilderAtEnd(builder, entryBlock);
-                            AddBlockToProcess();
-                        }
-
-                        Debug(
-                            $"[{instruction.OpCode} {operand}] -> Created Branch");
-                        continue;
-                    }
-
-                    if (instruction.OpCode == OpCodes.Beq ||
-                        instruction.OpCode == OpCodes.Beq_S)
-                    {
-                        var lval = builderStack.Pop();
-                        var rval = builderStack.Pop();
-                        var comprval = rval.ValRef.Value;
-                        var operand = (Instruction) instruction.Operand;
-                        var branchToBlock = branchTo[operand];
-                        if (!rval.ValRef.Value.TypeOf().Equals(lval.ValRef.Value.TypeOf()))
-                        {
-                            comprval = AutoCast(builder, rval.ValRef.Value, lval.ValRef.Value.TypeOf());
-                        }
-
-                        entryBlock = LLVM.AppendBasicBlock(entryFunction, "");
-                        ProcessBranchComp(LLVMIntPredicate.LLVMIntEQ, lval.ValRef.Value, comprval, branchToBlock,
-                            entryBlock);
-                        if (branchTo.ContainsKey(instruction.Next))
-                            break;
-                        else
-                        {
-                            LLVM.PositionBuilderAtEnd(builder, entryBlock);
-                            AddBlockToProcess();
-                        }
-
-                        Debug(
-                            $"[{instruction.OpCode} {operand}] -> Created Branch");
-                        continue;
-                    }
-
-                    if (instruction.OpCode == OpCodes.Bge ||
-                        instruction.OpCode == OpCodes.Bge_S)
-                    {
-                        var lval = builderStack.Pop();
-                        var rval = builderStack.Pop();
-                        var comprval = rval.ValRef.Value;
-                        var operand = (Instruction) instruction.Operand;
-                        var branchToBlock = branchTo[operand];
-                        if (!rval.ValRef.Value.TypeOf().Equals(lval.ValRef.Value.TypeOf()))
-                        {
-                            comprval = AutoCast(builder, rval.ValRef.Value, lval.ValRef.Value.TypeOf());
-                        }
-
-                        entryBlock = LLVM.AppendBasicBlock(entryFunction, "");
-                        ProcessBranchComp(LLVMIntPredicate.LLVMIntSGE, lval.ValRef.Value, comprval, branchToBlock,
-                            entryBlock);
-                        if (branchTo.ContainsKey(instruction.Next))
-                            break;
-                        else
-                        {
-                            LLVM.PositionBuilderAtEnd(builder, entryBlock);
-                            AddBlockToProcess();
-                        }
-
-                        Debug(
-                            $"[{instruction.OpCode} {operand}] -> Created Branch");
-                        continue;
-                    }
-
-                    if (instruction.OpCode == OpCodes.Bge_Un ||
-                        instruction.OpCode == OpCodes.Bge_Un_S)
-                    {
-                        var lval = builderStack.Pop();
-                        var rval = builderStack.Pop();
-                        var comprval = rval.ValRef.Value;
-                        var operand = (Instruction) instruction.Operand;
-                        var branchToBlock = branchTo[operand];
-                        if (!rval.ValRef.Value.TypeOf().Equals(lval.ValRef.Value.TypeOf()))
-                        {
-                            comprval = AutoCast(builder, rval.ValRef.Value, lval.ValRef.Value.TypeOf());
-                        }
-
-                        entryBlock = LLVM.AppendBasicBlock(entryFunction, "");
-                        ProcessBranchComp(LLVMIntPredicate.LLVMIntUGE, lval.ValRef.Value, comprval, branchToBlock,
-                            entryBlock);
-                        if (branchTo.ContainsKey(instruction.Next))
-                            break;
-                        else
-                        {
-                            LLVM.PositionBuilderAtEnd(builder, entryBlock);
-                            AddBlockToProcess();
-                        }
-
-                        Debug(
-                            $"[{instruction.OpCode} {operand}] -> Created Branch");
-                        continue;
-                    }
-
-                    if (instruction.OpCode == OpCodes.Ble ||
-                        instruction.OpCode == OpCodes.Ble_S)
-                    {
-                        var lval = builderStack.Pop();
-                        var rval = builderStack.Pop();
-                        var comprval = rval.ValRef.Value;
-                        var operand = (Instruction) instruction.Operand;
-                        var branchToBlock = branchTo[operand];
-                        if (!rval.ValRef.Value.TypeOf().Equals(lval.ValRef.Value.TypeOf()))
-                        {
-                            comprval = AutoCast(builder, rval.ValRef.Value, lval.ValRef.Value.TypeOf());
-                        }
-
-                        entryBlock = LLVM.AppendBasicBlock(entryFunction, "");
-                        ProcessBranchComp(LLVMIntPredicate.LLVMIntSLE, lval.ValRef.Value, comprval, branchToBlock,
-                            entryBlock);
-                        if (branchTo.ContainsKey(instruction.Next))
-                            break;
-                        else
-                        {
-                            LLVM.PositionBuilderAtEnd(builder, entryBlock);
-                            AddBlockToProcess();
-                        }
-
-                        Debug(
-                            $"[{instruction.OpCode} {operand}] -> Created Branch");
-                        continue;
-                    }
-
-                    if (instruction.OpCode == OpCodes.Ble_Un ||
-                        instruction.OpCode == OpCodes.Ble_Un_S)
-                    {
-                        var lval = builderStack.Pop();
-                        var rval = builderStack.Pop();
-                        var comprval = rval.ValRef.Value;
-                        var operand = (Instruction) instruction.Operand;
-                        var branchToBlock = branchTo[operand];
-                        if (!rval.ValRef.Value.TypeOf().Equals(lval.ValRef.Value.TypeOf()))
-                        {
-                            comprval = AutoCast(builder, rval.ValRef.Value, lval.ValRef.Value.TypeOf());
-                        }
-
-                        entryBlock = LLVM.AppendBasicBlock(entryFunction, "");
-                        ProcessBranchComp(LLVMIntPredicate.LLVMIntULE, lval.ValRef.Value, comprval, branchToBlock,
-                            entryBlock);
-                        if (branchTo.ContainsKey(instruction.Next))
-                            break;
-                        else
-                        {
-                            LLVM.PositionBuilderAtEnd(builder, entryBlock);
-                            AddBlockToProcess();
-                        }
-
-                        Debug(
-                            $"[{instruction.OpCode} {operand}] -> Created Branch");
-                        continue;
-                    }
-
-                    if (instruction.OpCode == OpCodes.Bgt ||
-                        instruction.OpCode == OpCodes.Bgt_S)
-                    {
-                        var lval = builderStack.Pop();
-                        var rval = builderStack.Pop();
-                        var comprval = rval.ValRef.Value;
-                        var operand = (Instruction) instruction.Operand;
-                        var branchToBlock = branchTo[operand];
-                        if (!rval.ValRef.Value.TypeOf().Equals(lval.ValRef.Value.TypeOf()))
-                        {
-                            comprval = AutoCast(builder, rval.ValRef.Value, lval.ValRef.Value.TypeOf());
-                        }
-
-                        entryBlock = LLVM.AppendBasicBlock(entryFunction, "");
-                        ProcessBranchComp(LLVMIntPredicate.LLVMIntSGT, lval.ValRef.Value, comprval, branchToBlock,
-                            entryBlock);
-                        if (branchTo.ContainsKey(instruction.Next))
-                            break;
-                        else
-                        {
-                            LLVM.PositionBuilderAtEnd(builder, entryBlock);
-                            AddBlockToProcess();
-                        }
-
-                        Debug(
-                            $"[{instruction.OpCode} {operand}] -> Created Branch");
-                        continue;
-                    }
-
-                    if (instruction.OpCode == OpCodes.Bgt_Un ||
-                        instruction.OpCode == OpCodes.Bgt_Un_S)
-                    {
-                        var lval = builderStack.Pop();
-                        var rval = builderStack.Pop();
-                        var comprval = rval.ValRef.Value;
-                        var operand = (Instruction) instruction.Operand;
-                        var branchToBlock = branchTo[operand];
-                        if (!rval.ValRef.Value.TypeOf().Equals(lval.ValRef.Value.TypeOf()))
-                        {
-                            comprval = AutoCast(builder, rval.ValRef.Value, lval.ValRef.Value.TypeOf());
-                        }
-
-                        entryBlock = LLVM.AppendBasicBlock(entryFunction, "");
-                        ProcessBranchComp(LLVMIntPredicate.LLVMIntUGT, lval.ValRef.Value, comprval, branchToBlock,
-                            entryBlock);
-                        if (branchTo.ContainsKey(instruction.Next))
-                            break;
-                        else
-                        {
-                            LLVM.PositionBuilderAtEnd(builder, entryBlock);
-                            AddBlockToProcess();
-                        }
-                        
-                        Debug(
-                            $"[{instruction.OpCode} {operand}] -> Created Branch");
-                        continue;
-                    }
-
-                    if (instruction.OpCode == OpCodes.Blt ||
-                        instruction.OpCode == OpCodes.Blt_S)
-                    {
-                        var lval = builderStack.Pop();
-                        var rval = builderStack.Pop();
-                        var comprval = rval.ValRef.Value;
-                        var operand = (Instruction) instruction.Operand;
-                        var branchToBlock = branchTo[operand];
-                        if (!rval.ValRef.Value.TypeOf().Equals(lval.ValRef.Value.TypeOf()))
-                        {
-                            comprval = AutoCast(builder, rval.ValRef.Value, lval.ValRef.Value.TypeOf());
-                        }
-
-                        entryBlock = LLVM.AppendBasicBlock(entryFunction, "");
-                        ProcessBranchComp(LLVMIntPredicate.LLVMIntSLT, lval.ValRef.Value, comprval, branchToBlock,
-                            entryBlock);
-                        if (processedBranch.Contains(instruction.Next))
-                            break;
-                        else
-                        {
-                            LLVM.PositionBuilderAtEnd(builder, entryBlock);
-                            AddBlockToProcess();
-                        }
-                        
-                        Debug(
-                            $"[{instruction.OpCode} {operand}] -> Created Branch");
-                        continue;
-                    }
-
-                    if (instruction.OpCode == OpCodes.Blt_Un ||
-                        instruction.OpCode == OpCodes.Blt_Un_S)
-                    {
-                        var lval = builderStack.Pop();
-                        var rval = builderStack.Pop();
-                        var comprval = rval.ValRef.Value;
-                        var operand = (Instruction) instruction.Operand;
-                        var branchToBlock = branchTo[operand];
-                        if (!rval.ValRef.Value.TypeOf().Equals(lval.ValRef.Value.TypeOf()))
-                        {
-                            comprval = AutoCast(builder, rval.ValRef.Value, lval.ValRef.Value.TypeOf());
-                        }
-
-                        entryBlock = LLVM.AppendBasicBlock(entryFunction, "");
-                        ProcessBranchComp(LLVMIntPredicate.LLVMIntULT, lval.ValRef.Value, comprval, branchToBlock,
-                            entryBlock);
-                        if (processedBranch.Contains(instruction.Next))
-                            break;
-                        else
-                        {
-                            LLVM.PositionBuilderAtEnd(builder, entryBlock);
-                            AddBlockToProcess();
-                        }
-                        
-                        Debug(
-                            $"[{instruction.OpCode} {operand}] -> Created Branch {branchToBlock} for True Branch and {entryBlock} for False Branch");
                         continue;
                     }
 
