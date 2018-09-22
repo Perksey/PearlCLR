@@ -1,6 +1,8 @@
 # PearlCLR
 Unmanaged/Managed CLR Project in C#
 
+Created by Tyler Crandall
+
 Supports:
 
 1. Basic structs/classes
