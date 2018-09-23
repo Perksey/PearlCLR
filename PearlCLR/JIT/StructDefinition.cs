@@ -21,7 +21,7 @@ namespace PearlCLR.JIT
         /// <summary>
         /// Field Definitions Parsed from C# Side
         /// </summary>
-        public List<FieldDefinition> CS_FieldDefs { get; set; }
+        public FieldDefinition[] CS_FieldDefs { get; set; }
         
         /// <summary>
         /// Field Type References for LLVM

@@ -14,6 +14,7 @@ namespace PearlCLR.JIT
         public static TypeDefinition UInt64Type = new TypeDefinition("System", "UInt64", TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.AutoLayout);
         public static TypeDefinition FloatType = new TypeDefinition("System", "Float", TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.AutoLayout);
         public static TypeDefinition DoubleType = new TypeDefinition("System", "Double", TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.AutoLayout);
+        public static TypeDefinition DecimalType = new TypeDefinition("System", "Decimal", TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.AutoLayout);
         public static TypeDefinition StringType = new TypeDefinition("System", "String", TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.AutoLayout);
         public static TypeDefinition NativeIntType = new TypeDefinition("System", "IntPtr", TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.AutoLayout);
     }

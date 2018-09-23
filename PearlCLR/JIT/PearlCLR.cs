@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography.X509Certificates;
 using Mono.Cecil;
 using LLVMSharp;
 using Mono.Cecil.Cil;
@@ -27,7 +28,7 @@ namespace PearlCLR.JIT
         private Dictionary<string, StructDefinition> FullSymbolToTypeRef { get; }
         private Dictionary<string, LLVMValueRef> SymbolToCallableFunction { get; }
         private Dictionary<string, LLVMTypeRef> SymbolToFunctionPointerProto { get; }
-
+        private JITCompilerOptions _options { get; } = new JITCompilerOptions();
         public PearlCLR(string file)
         {
             assembly = AssemblyDefinition.ReadAssembly(file);
@@ -47,11 +48,49 @@ namespace PearlCLR.JIT
             clrLogger = LogManager.GetCurrentClassLogger();
         }
 
+        private void AddBCLObjects()
+        {
+            StructDefinition structDef = new StructDefinition();
+
+            if (_options.MetadataTypeHandlingModeOption == MetadataTypeHandlingMode.Full_Fixed)
+            {
+                // C# Fields are going to be seen as Int32, but it may not necessarily be 32 bit integer,
+                // What is important is the specified type information in LLVM.
+                // This is intended to allow a more flexible optimization feature.
+                structDef.CS_FieldDefs = new [] {
+                    new FieldDefinition("___INTERNAL__DO_NOT_TOUCH__CLR__TYPEHANDLE",
+                    FieldAttributes.SpecialName | FieldAttributes.Private | FieldAttributes.CompilerControlled,
+                    MiniBCL.Int32Type), new FieldDefinition("___INTERNAL__DO_NOT_TOUCH__CLR__SYNC",
+                    FieldAttributes.SpecialName | FieldAttributes.Private | FieldAttributes.CompilerControlled,
+                    MiniBCL.Int32Type)};
+
+                structDef.CS_StructName = "Object";
+                structDef.LL_StructName = "Object";
+
+                structDef.LL_FieldTypeRefs = new[]
+                {
+                    new LLVMFieldDefAndRef(MiniBCL.Int32Type, LLVM.IntType(_options.MetadataFixedLength)),
+                    new LLVMFieldDefAndRef(MiniBCL.Int32Type, LLVM.IntType(_options.MetadataFixedLength))
+                };
+
+                structDef.StructTypeRef = LLVM.StructType(structDef.LL_FieldTypeRefs.Select(I => I.FieldTypeRef).ToArray(), true);
+                
+                FullSymbolToTypeRef.Add("System.Object", structDef);
+                
+                SymbolToCallableFunction.Add("System.Object::GetType", default(LLVMValueRef));
+                
+                clrLogger.Debug("Added");
+            }
+        }
+
         public void ProcessMainModule()
         {
             LLVM.InstallFatalErrorHandler(reason => clrLogger.Debug(reason));
             LoadDependency();
             clrLogger.Info("Running Process Main Module");
+            clrLogger.Debug("Adding Critical Objects");
+            AddBCLObjects();
+            clrLogger.Debug("Added Critical Objects");
             clrLogger.Debug("Processing all exported types");
             ProcessAllExportedTypes();
             clrLogger.Debug("Processed all exported types");
@@ -65,7 +104,7 @@ namespace PearlCLR.JIT
             Verify();
             clrLogger.Debug("Verified LLVM emitted codes");
             clrLogger.Debug("Optimizing LLVM emitted codes");
-            Optimize();
+            //Optimize();
             clrLogger.Debug("Optimized LLVM emitted codes");
             clrLogger.Debug("Compiling LLVM emitted codes");
             Compile();
@@ -138,6 +177,10 @@ namespace PearlCLR.JIT
 
             if (type.BaseType != null && type.FullName != type.BaseType.FullName)
             {
+                if (type.BaseType.FullName == "System.Object")
+                {
+                    
+                }
                 var declaredTypeFields = ResolveAllFields(type.BaseType.Resolve());
                 foreach (var field in declaredTypeFields)
                 {
@@ -150,7 +193,7 @@ namespace PearlCLR.JIT
 
         private StructDefinition ProcessForStruct(TypeDefinition type)
         {
-            clrLogger.Debug($"Processing {type.FullName} type for LLVM");
+            clrLogger.Debug($"\tProcessing {type.FullName} type for LLVM");
             var processed = ResolveAllFields(type.Resolve());
             foreach (var field in processed)
             {
@@ -164,13 +207,13 @@ namespace PearlCLR.JIT
             {
                 CS_StructName = type.FullName,
                 LL_StructName = type.FullName,
-                CS_FieldDefs = processed.ToList(),
+                CS_FieldDefs = processed,
                 LL_FieldTypeRefs = processed.Select(I => ResolveType(I.FieldType)).ToArray()
             };
             structDef.StructTypeRef = LLVM.StructTypeInContext(llvmContextRef, structDef.LL_FieldTypeRefs.Select(
                 f =>
                 {
-                    clrLogger.Debug($"\t{f.StackType.FullName} - {f.FieldTypeRef}");
+                    clrLogger.Debug($"\t\t{f.StackType.FullName} - {f.FieldTypeRef}");
                     return f.FieldTypeRef;
                 }).ToArray(), true);
             return structDef;
@@ -252,13 +295,28 @@ namespace PearlCLR.JIT
                     {
                         return LLVM.DoubleType();
                     }
-
+                    case "System.Decimal":
+                    {
+                        LLVM.VectorType()
+                        return LLVM.FP128Type();
+                    }
                     default:
                     {
                         throw new Exception("Unhandled Type for Primitive!" + def.FullName);
                     }
                 }
-            
+
+            if (def.FullName == "System.String")
+            {
+                if (_options.CStringMode)
+                // This is a special case, all string in this CLR is null terminated.
+                    return LLVM.PointerType(LLVM.Int8Type(), 0);
+            }
+
+            if (def.FullName == "System.Type")
+            {
+                return LLVM.VoidType();
+            }
             if (FullSymbolToTypeRef.TryGetValue(def.FullName, out var val))
             {
                 if (def.Resolve().IsClass)
@@ -282,10 +340,13 @@ namespace PearlCLR.JIT
             }
 
             var methodToCall = (MethodReference) instruction.Operand;
-
+            Debug(methodToCall.ToString());
+            var resolvedMethodToCall = methodToCall.Resolve();
             if (methodToCall.HasThis &&
-                (methodToCall.Resolve().DeclaringType.BaseType.FullName == "System.Delegate" ||
-                 methodToCall.Resolve().DeclaringType.BaseType.FullName == "System.MulticastDelegate"))
+                resolvedMethodToCall.DeclaringType != null &&
+                resolvedMethodToCall.DeclaringType.BaseType != null &&
+                (resolvedMethodToCall.DeclaringType.BaseType.FullName == "System.Delegate" ||
+                 resolvedMethodToCall.DeclaringType.BaseType.FullName == "System.MulticastDelegate"))
             {
                 var refs = new LLVMValueRef[methodToCall.Parameters.Count];
                 if (refs.Length > 0)
@@ -450,7 +511,6 @@ namespace PearlCLR.JIT
             var entryBlock = LLVM.AppendBasicBlock(entryFunction, "entry");
             var builder = LLVM.CreateBuilder();
             LLVM.PositionBuilderAtEnd(builder, entryBlock);
-
             foreach (var local in method.Body.Variables)
             {
                 Debug(local.VariableType.FullName);
@@ -1274,8 +1334,9 @@ namespace PearlCLR.JIT
                             throw new Exception(
                                 "The Value/Reference returned as null thus cannot be stored in Struct!");
 
-                        var index = (uint) FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs
-                            .FindIndex(I => I.Name == fieldDef.Name);
+                        var index = (uint)  Array.IndexOf(FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs, 
+                            FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs
+                            .First(I => I.Name == fieldDef.Name));
 
                         var refToStruct = structRef.ValRef.Value;
                         LLVMValueRef offset;
@@ -1337,8 +1398,9 @@ namespace PearlCLR.JIT
                         //var load = LLVM.BuildLoad(builder, structRef.ValRef.Value, $"Loaded_{structRef.Type.Name}");
                         var load = structRef.ValRef.Value;
                         var offset = LLVM.BuildStructGEP(builder, load,
-                            (uint) FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs
-                                .FindIndex(I => I.Name == fieldDef.Name), $"Offset_{fieldDef.Name}");
+                            (uint) Array.IndexOf(FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs,
+                                FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs
+                                .First(I => I.Name == fieldDef.Name)), $"Offset_{fieldDef.Name}");
                         var item = new BuilderStackItem(fieldDef.FieldType, LLVM.BuildLoad(builder, offset, ""));
                         builderStack.Push(item);
                         Debug(
@@ -1763,6 +1825,7 @@ namespace PearlCLR.JIT
                             intCmp = LLVMIntPredicate.LLVMIntULT;
                         else
                         {
+                            // You have to somehow corrupt the program to get here.
                             throw new BadImageFormatException();
                         }
                         

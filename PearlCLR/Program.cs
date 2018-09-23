@@ -11,7 +11,7 @@ namespace PearlCLR
         static void Main(string[] args)
         {
             Console.WriteLine("Attempting to Process Demo.dll");
-            var jitter = new jit("YourDllPathHere");
+            var jitter = new jit("/home/centi/Repos/Demo/bin/Debug/netcoreapp2.1/Demo.dll");
             jitter.ProcessMainModule();
             Console.WriteLine("Application Completed!");
         }
