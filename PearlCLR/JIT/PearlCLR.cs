@@ -44,6 +44,7 @@ namespace PearlCLR.JIT
 
             llvmModuleRef = LLVM.ModuleCreateWithName("PearlCLRModule");
             llvmContextRef = LLVM.GetModuleContext(llvmModuleRef);
+            LLVM.SetTarget(llvmModuleRef, "wasm32");
 
             clrLogger = LogManager.GetCurrentClassLogger();
         }
@@ -104,7 +105,7 @@ namespace PearlCLR.JIT
             Verify();
             clrLogger.Debug("Verified LLVM emitted codes");
             clrLogger.Debug("Optimizing LLVM emitted codes");
-            //Optimize();
+            Optimize();
             clrLogger.Debug("Optimized LLVM emitted codes");
             clrLogger.Debug("Compiling LLVM emitted codes");
             Compile();
@@ -129,9 +130,14 @@ namespace PearlCLR.JIT
         private void LoadDependency()
         {
             // We need printf!
-            if (LLVM.LoadLibraryPermanently("/usr/lib/libc.so.6") == new LLVMBool(1))
+            if (Environment.OSVersion.Platform == PlatformID.Unix && LLVM.LoadLibraryPermanently("/usr/lib/libc.so.6") == new LLVMBool(1))
             {
                 throw new Exception("Failed to load Libc!");
+            }
+            else if (Environment.OSVersion.Platform == PlatformID.Win32NT &&
+                     LLVM.LoadLibraryPermanently("msvcrt.dll") == new LLVMBool(1))
+            {
+                throw new Exception("Failed to load winvcrt!");
             }
 
             clrLogger.Info("Successfully loaded LibC Library.");
@@ -297,7 +303,7 @@ namespace PearlCLR.JIT
                     }
                     case "System.Decimal":
                     {
-                        LLVM.VectorType()
+                        // TODO: Stop being lazy with FP128Type
                         return LLVM.FP128Type();
                     }
                     default:
