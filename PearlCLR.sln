@@ -4,6 +4,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PearlCLR", "PearlCLR\PearlC
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Demo", "Demo\Demo.csproj", "{CA2AD608-BD41-41C2-B9E5-1AF6DC6B5E37}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PearlCLRExtensions", "PearlCLRExtensions\PearlCLRExtensions.csproj", "{66342DF3-1077-49D6-971C-303CE08FBFF8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PearlCLRRunner", "PearlCLRRunner\PearlCLRRunner.csproj", "{7FAB8BB7-AEFC-4977-928D-16F60B6A7C9B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -18,5 +22,13 @@ Global
 		{CA2AD608-BD41-41C2-B9E5-1AF6DC6B5E37}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CA2AD608-BD41-41C2-B9E5-1AF6DC6B5E37}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CA2AD608-BD41-41C2-B9E5-1AF6DC6B5E37}.Release|Any CPU.Build.0 = Release|Any CPU
+		{66342DF3-1077-49D6-971C-303CE08FBFF8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{66342DF3-1077-49D6-971C-303CE08FBFF8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{66342DF3-1077-49D6-971C-303CE08FBFF8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{66342DF3-1077-49D6-971C-303CE08FBFF8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7FAB8BB7-AEFC-4977-928D-16F60B6A7C9B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7FAB8BB7-AEFC-4977-928D-16F60B6A7C9B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7FAB8BB7-AEFC-4977-928D-16F60B6A7C9B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7FAB8BB7-AEFC-4977-928D-16F60B6A7C9B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

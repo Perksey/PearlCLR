@@ -44,7 +44,6 @@ namespace PearlCLR.JIT
 
             llvmModuleRef = LLVM.ModuleCreateWithName("PearlCLRModule");
             llvmContextRef = LLVM.GetModuleContext(llvmModuleRef);
-            LLVM.SetTarget(llvmModuleRef, "wasm32");
 
             clrLogger = LogManager.GetCurrentClassLogger();
         }

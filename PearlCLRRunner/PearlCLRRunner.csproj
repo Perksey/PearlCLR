@@ -6,7 +6,8 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\PearlCLRExtensions\PearlCLRExtensions.csproj" />
+      <ProjectReference Include="..\Demo\Demo.csproj" />
+      <ProjectReference Include="..\PearlCLR\PearlCLR.csproj" />
     </ItemGroup>
 
 </Project>
