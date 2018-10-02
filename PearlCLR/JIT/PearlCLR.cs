@@ -29,7 +29,7 @@ namespace PearlCLR.JIT
         private Dictionary<string, LLVMValueRef> SymbolToCallableFunction { get; }
         private Dictionary<string, LLVMTypeRef> SymbolToFunctionPointerProto { get; }
         private JITCompilerOptions _options { get; } = new JITCompilerOptions();
-        public PearlCLR(string file)
+        public PearlCLR(string file, string target = null)
         {
             assembly = AssemblyDefinition.ReadAssembly(file);
             LLVM.InitializeX86TargetMC();
@@ -44,8 +44,43 @@ namespace PearlCLR.JIT
 
             llvmModuleRef = LLVM.ModuleCreateWithName("PearlCLRModule");
             llvmContextRef = LLVM.GetModuleContext(llvmModuleRef);
-
+            LLVM.SetTarget(llvmModuleRef, "x86_64-pc-windows-gnu");
+            var targetRef = LLVM.GetFirstTarget();
+            var targetMachine = LLVM.CreateTargetMachine(targetRef, "x86_64-pc-windows-gnu", "", "",
+                LLVMCodeGenOptLevel.LLVMCodeGenLevelAggressive, LLVMRelocMode.LLVMRelocDefault,
+                LLVMCodeModel.LLVMCodeModelDefault);
+            var targetData = LLVM.CreateTargetDataLayout(targetMachine);
+            var size = LLVM.ABISizeOfType(targetData, LLVM.PointerType(LLVM.VoidType(), 0));
             clrLogger = LogManager.GetCurrentClassLogger();
+            
+            clrLogger.Debug($"Pointer Size: {size}");
+        }
+
+        public string TargetByPlatform()
+        {
+            switch (Environment.OSVersion.Platform)
+            {
+                case PlatformID.Unix:
+                {
+                    if (Environment.Is64BitProcess)
+                        return "x86_64-pc-windows-gnu";
+                    else
+                        return "x86-pc-";
+                }
+                case PlatformID.Win32S:
+                case PlatformID.Win32Windows:
+                case PlatformID.Win32NT:
+                case PlatformID.WinCE:
+                {
+                    return "";
+                }
+                case PlatformID.MacOSX:
+                {
+                    return "";
+                }
+                default:
+                    return "";
+            }
         }
 
         private void AddBCLObjects()
@@ -80,6 +115,11 @@ namespace PearlCLR.JIT
                 SymbolToCallableFunction.Add("System.Object::GetType", default(LLVMValueRef));
                 
                 clrLogger.Debug("Added");
+            }
+            else
+            {
+                // TODO: Implement support for Full_Native and None.
+                throw new NotImplementedException();
             }
         }
 
@@ -232,6 +272,8 @@ namespace PearlCLR.JIT
             if (def.IsPointer)
             {
                 var definedType = ResolveLLVMType(def.Resolve());
+                // If confused what this is, this exists to support something like this:
+                // int**************************************** into LLVM representation
                 for (var I = def.Name.Length - 1; I > -1; --I)
                     if (def.Name[I] == '*')
                         definedType = LLVM.PointerType(definedType, 0);
@@ -243,6 +285,10 @@ namespace PearlCLR.JIT
             if (def.FullName == "System.Void")
             {
                 return LLVM.VoidType();
+            }
+            if (def.FullName == "System.Decimal")
+            {
+                return LLVM.FP128Type();
             }
 
             if (def.IsPrimitive)
@@ -300,11 +346,6 @@ namespace PearlCLR.JIT
                     {
                         return LLVM.DoubleType();
                     }
-                    case "System.Decimal":
-                    {
-                        // TODO: Stop being lazy with FP128Type
-                        return LLVM.FP128Type();
-                    }
                     default:
                     {
                         throw new Exception("Unhandled Type for Primitive!" + def.FullName);
@@ -341,7 +382,7 @@ namespace PearlCLR.JIT
 
             void Debug(string msg)
             {
-                clrLogger.Debug(prepend + msg);
+                clrLogger.Debug($"{prepend}{msg}");
             }
 
             var methodToCall = (MethodReference) instruction.Operand;
@@ -367,7 +408,6 @@ namespace PearlCLR.JIT
                 builderStack.Push(stackItem);
                 Debug(
                     $"[{instruction.OpCode.Name} {methodToCall.FullName}] -> Determined as Delegate, Popped Reference {reference} and Push {stackItem.ValRef} to Stack");
-                return;
             }
             else
             {
@@ -595,6 +635,7 @@ namespace PearlCLR.JIT
                 }
                 return LLVM.BuildStore(builder, lval, rval);
             }
+            
             void ProcessStoreLoc(BuilderStackItem stackItem, int localVariableIndex)
             {
                 var localVariableType = localVariableTypes[localVariableIndex];
@@ -1060,7 +1101,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_U1] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "UNSIGNED INTEGER 1 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1087,7 +1127,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_U2] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "UNSIGNED INTEGER 2 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1114,7 +1153,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_U4] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "UNSIGNED INTEGER 4 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1141,7 +1179,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_U8] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "UNSIGNED INTEGER 8 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1168,7 +1205,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_I1] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "INTEGER 1 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1195,7 +1231,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_I2] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "INTEGER 2 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1230,7 +1265,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_I4] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "INTEGER 4 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1257,7 +1291,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_I8] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "INTEGER 8 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1286,7 +1319,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_R4] -> Popped {value.ValRef.Value} and Pushed As Float {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion to Real 32 bit
                         else
                         {
                             throw new Exception(
@@ -1317,7 +1349,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_R8] -> Popped {value.ValRef.Value} and Pushed As Float {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion to Real 64 bit
                         else
                         {
                             throw new Exception(
