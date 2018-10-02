@@ -16,16 +16,21 @@ Does not support:
 2. Decimal Type
 3. Object Type and it's metadata
 
-#Project Roots:
-##PearlCLR
+# Project Roots:
+
+## PearlCLR
+
 The CLR Project itself which includes runtime/jit compilation code.
 
-##PearlCLRExtensions
+## PearlCLRExtensions
+
 A project containing variety of functions and PearlCLR specific features that include, but not limited to, manual memory management and
 type resolution and metadata management.
 
-##Demo
+## Demo
+
 A scratchpad project written in C# that imports PearlCLRExtensions project for PearlCLR specific features.
 
-##PearlCLRRunner
+## PearlCLRRunner
+
 A project that simply import PearlCLR and Demo and run PearlCLR on compiled Demo library.
