@@ -24,6 +24,7 @@ namespace PearlCLR.JIT
         private Logger clrLogger { get; set; }
         private readonly LLVMModuleRef llvmModuleRef;
         private readonly LLVMContextRef llvmContextRef;
+        private readonly LLVMTypeResolver _llvmTypeResolver;
         private LLVMExecutionEngineRef llvmEngineRef;
         private Dictionary<string, StructDefinition> FullSymbolToTypeRef { get; }
         private Dictionary<string, LLVMValueRef> SymbolToCallableFunction { get; }
@@ -46,6 +47,7 @@ namespace PearlCLR.JIT
             llvmContextRef = LLVM.GetModuleContext(llvmModuleRef);
 
             clrLogger = LogManager.GetCurrentClassLogger();
+            _llvmTypeResolver = new LLVMTypeResolver(_options.CStringMode, FullSymbolToTypeRef);
         }
 
         private void AddBCLObjects()
@@ -225,112 +227,9 @@ namespace PearlCLR.JIT
         }
 
         private LLVMFieldDefAndRef ResolveType(TypeReference fieldType) =>
-            new LLVMFieldDefAndRef(fieldType, ResolveLLVMType(fieldType));
+            new LLVMFieldDefAndRef(fieldType, _llvmTypeResolver.Resolve(fieldType));
 
-        private LLVMTypeRef ResolveLLVMType(TypeReference def)
-        {
-            if (def.IsPointer)
-            {
-                var definedType = ResolveLLVMType(def.Resolve());
-                for (var I = def.Name.Length - 1; I > -1; --I)
-                    if (def.Name[I] == '*')
-                        definedType = LLVM.PointerType(definedType, 0);
-                    else
-                        break;
-                return definedType;
-            }
-
-            if (def.FullName == "System.Void")
-            {
-                return LLVM.VoidType();
-            }
-
-            if (def.IsPrimitive)
-                switch (def.FullName)
-                {
-                    case "System.Boolean":
-                    {
-                        return LLVM.Int8Type();
-                    }
-                    case "System.SByte":
-                    {
-                        return LLVM.Int8Type();
-                    }
-                    case "System.Int8":
-                    {
-                        return LLVM.Int8Type();
-                    }
-                    case "System.Int16":
-                    {
-                        return LLVM.Int16Type();
-                    }
-                    case "System.Int32":
-                    {
-                        return LLVM.Int32Type();
-                    }
-                    case "System.Int64":
-                    {
-                        return LLVM.Int64Type();
-                    }
-                    case "System.Byte":
-                    {
-                        return LLVM.Int8Type();
-                    }
-                    case "System.UInt8":
-                    {
-                        return LLVM.Int8Type();
-                    }
-                    case "System.UInt16":
-                    {
-                        return LLVM.Int16Type();
-                    }
-                    case "System.UInt32":
-                    {
-                        return LLVM.Int32Type();
-                    }
-                    case "System.UInt64":
-                    {
-                        return LLVM.Int64Type();
-                    }
-                    case "System.Float":
-                    {
-                        return LLVM.FloatType();
-                    }
-                    case "System.Double":
-                    {
-                        return LLVM.DoubleType();
-                    }
-                    case "System.Decimal":
-                    {
-                        // TODO: Stop being lazy with FP128Type
-                        return LLVM.FP128Type();
-                    }
-                    default:
-                    {
-                        throw new Exception("Unhandled Type for Primitive!" + def.FullName);
-                    }
-                }
-
-            if (def.FullName == "System.String")
-            {
-                if (_options.CStringMode)
-                // This is a special case, all string in this CLR is null terminated.
-                    return LLVM.PointerType(LLVM.Int8Type(), 0);
-            }
-
-            if (def.FullName == "System.Type")
-            {
-                return LLVM.VoidType();
-            }
-            if (FullSymbolToTypeRef.TryGetValue(def.FullName, out var val))
-            {
-                if (def.Resolve().IsClass)
-                    return LLVM.PointerType(val.StructTypeRef, 0);
-                return val.StructTypeRef;
-            }
-
-            throw new NotSupportedException($"Unhandled Type. {def.FullName} {def.DeclaringType}");
-        }
+       
 
         private void ProcessCall(Instruction instruction, LLVMBuilderRef builder, int indent, Stack<BuilderStackItem> builderStack)
         {
@@ -522,13 +421,13 @@ namespace PearlCLR.JIT
                 if (local.VariableType.IsPointer)
                 {
                     localVariableTypes.Add(local.VariableType);
-                    var alloca = LLVM.BuildAlloca(builder, ResolveLLVMType(local.VariableType), $"Alloca_{local.VariableType.Name}");
+                    var alloca = LLVM.BuildAlloca(builder, _llvmTypeResolver.Resolve(local.VariableType), $"Alloca_{local.VariableType.Name}");
                     Debug($"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
                     localVariables.Add(alloca);
                 }
                 else if (local.VariableType.IsPrimitive)
                 {
-                    var type = ResolveLLVMType(local.VariableType);
+                    var type = _llvmTypeResolver.Resolve(local.VariableType);
                     localVariableTypes.Add(local.VariableType);
                     var alloca = LLVM.BuildAlloca(builder, type, $"Alloca_{local.VariableType.Name}");
                     Debug($"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
@@ -602,7 +501,7 @@ namespace PearlCLR.JIT
                 //TODO: Need a better way to compare...
                 if (localVariableType.IsPointer)
                 {
-                    var resolvePtrType = ResolveLLVMType(localVariableType);
+                    var resolvePtrType = _llvmTypeResolver.Resolve(localVariableType);
                     var store = ProcessStore(LLVM.BuildIntToPtr(builder, stackItem.ValRef.Value, resolvePtrType, "IntPtr"), localVariable);
                     Debug($"[Stloc_{localVariableIndex}] -> Popped {stackItem.ValRef.Value.TypeOf()} and Stored {store}");
                 }
