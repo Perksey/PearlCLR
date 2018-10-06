@@ -30,7 +30,7 @@ namespace PearlCLR.JIT
         private Dictionary<string, LLVMValueRef> SymbolToCallableFunction { get; }
         private Dictionary<string, LLVMTypeRef> SymbolToFunctionPointerProto { get; }
         private JITCompilerOptions _options { get; } = new JITCompilerOptions();
-        public PearlCLR(string file)
+        public PearlCLR(string file, string target = null)
         {
             assembly = AssemblyDefinition.ReadAssembly(file);
             LLVM.InitializeX86TargetMC();
@@ -45,9 +45,43 @@ namespace PearlCLR.JIT
 
             llvmModuleRef = LLVM.ModuleCreateWithName("PearlCLRModule");
             llvmContextRef = LLVM.GetModuleContext(llvmModuleRef);
-
+            LLVM.SetTarget(llvmModuleRef, "x86_64-pc-windows-gnu");
+            var targetRef = LLVM.GetFirstTarget();
+            var targetMachine = LLVM.CreateTargetMachine(targetRef, "x86_64-pc-windows-gnu", "", "",
+                LLVMCodeGenOptLevel.LLVMCodeGenLevelAggressive, LLVMRelocMode.LLVMRelocDefault,
+                LLVMCodeModel.LLVMCodeModelDefault);
+            var targetData = LLVM.CreateTargetDataLayout(targetMachine);
+            var size = LLVM.ABISizeOfType(targetData, LLVM.PointerType(LLVM.VoidType(), 0));
             clrLogger = LogManager.GetCurrentClassLogger();
-            _llvmTypeResolver = new LLVMTypeResolver(_options.CStringMode, FullSymbolToTypeRef);
+            _llvmTypeResolver = new LLVMTypeResolver(_options.CStringMode, FullSymbolToTypeRef);            
+            clrLogger.Debug($"Pointer Size: {size}");
+        }
+
+        public string TargetByPlatform()
+        {
+            switch (Environment.OSVersion.Platform)
+            {
+                case PlatformID.Unix:
+                {
+                    if (Environment.Is64BitProcess)
+                        return "x86_64-pc-windows-gnu";
+                    else
+                        return "x86-pc-";
+                }
+                case PlatformID.Win32S:
+                case PlatformID.Win32Windows:
+                case PlatformID.Win32NT:
+                case PlatformID.WinCE:
+                {
+                    return "";
+                }
+                case PlatformID.MacOSX:
+                {
+                    return "";
+                }
+                default:
+                    return "";
+            }
         }
 
         private void AddBCLObjects()
@@ -82,6 +116,11 @@ namespace PearlCLR.JIT
                 SymbolToCallableFunction.Add("System.Object::GetType", default(LLVMValueRef));
                 
                 clrLogger.Debug("Added");
+            }
+            else
+            {
+                // TODO: Implement support for Full_Native and None.
+                throw new NotImplementedException();
             }
         }
 
@@ -229,7 +268,111 @@ namespace PearlCLR.JIT
         private LLVMFieldDefAndRef ResolveType(TypeReference fieldType) =>
             new LLVMFieldDefAndRef(fieldType, _llvmTypeResolver.Resolve(fieldType));
 
-       
+        private LLVMTypeRef ResolveLLVMType(TypeReference def)
+        {
+            if (def.IsPointer)
+            {
+                var definedType = ResolveLLVMType(def.Resolve());
+                // If confused what this is, this exists to support something like this:
+                // int**************************************** into LLVM representation
+                for (var I = def.Name.Length - 1; I > -1; --I)
+                    if (def.Name[I] == '*')
+                        definedType = LLVM.PointerType(definedType, 0);
+                    else
+                        break;
+                return definedType;
+            }
+
+            if (def.FullName == "System.Void")
+            {
+                return LLVM.VoidType();
+            }
+            if (def.FullName == "System.Decimal")
+            {
+                return LLVM.FP128Type();
+            }
+
+            if (def.IsPrimitive)
+                switch (def.FullName)
+                {
+                    case "System.Boolean":
+                    {
+                        return LLVM.Int8Type();
+                    }
+                    case "System.SByte":
+                    {
+                        return LLVM.Int8Type();
+                    }
+                    case "System.Int8":
+                    {
+                        return LLVM.Int8Type();
+                    }
+                    case "System.Int16":
+                    {
+                        return LLVM.Int16Type();
+                    }
+                    case "System.Int32":
+                    {
+                        return LLVM.Int32Type();
+                    }
+                    case "System.Int64":
+                    {
+                        return LLVM.Int64Type();
+                    }
+                    case "System.Byte":
+                    {
+                        return LLVM.Int8Type();
+                    }
+                    case "System.UInt8":
+                    {
+                        return LLVM.Int8Type();
+                    }
+                    case "System.UInt16":
+                    {
+                        return LLVM.Int16Type();
+                    }
+                    case "System.UInt32":
+                    {
+                        return LLVM.Int32Type();
+                    }
+                    case "System.UInt64":
+                    {
+                        return LLVM.Int64Type();
+                    }
+                    case "System.Float":
+                    {
+                        return LLVM.FloatType();
+                    }
+                    case "System.Double":
+                    {
+                        return LLVM.DoubleType();
+                    }
+                    default:
+                    {
+                        throw new Exception("Unhandled Type for Primitive!" + def.FullName);
+                    }
+                }
+
+            if (def.FullName == "System.String")
+            {
+                if (_options.CStringMode)
+                // This is a special case, all string in this CLR is null terminated.
+                    return LLVM.PointerType(LLVM.Int8Type(), 0);
+            }
+
+            if (def.FullName == "System.Type")
+            {
+                return LLVM.VoidType();
+            }
+            if (FullSymbolToTypeRef.TryGetValue(def.FullName, out var val))
+            {
+                if (def.Resolve().IsClass)
+                    return LLVM.PointerType(val.StructTypeRef, 0);
+                return val.StructTypeRef;
+            }
+
+            throw new NotSupportedException($"Unhandled Type. {def.FullName} {def.DeclaringType}");
+        }
 
         private void ProcessCall(Instruction instruction, LLVMBuilderRef builder, int indent, Stack<BuilderStackItem> builderStack)
         {
@@ -240,7 +383,7 @@ namespace PearlCLR.JIT
 
             void Debug(string msg)
             {
-                clrLogger.Debug(prepend + msg);
+                clrLogger.Debug($"{prepend}{msg}");
             }
 
             var methodToCall = (MethodReference) instruction.Operand;
@@ -266,7 +409,6 @@ namespace PearlCLR.JIT
                 builderStack.Push(stackItem);
                 Debug(
                     $"[{instruction.OpCode.Name} {methodToCall.FullName}] -> Determined as Delegate, Popped Reference {reference} and Push {stackItem.ValRef} to Stack");
-                return;
             }
             else
             {
@@ -494,6 +636,7 @@ namespace PearlCLR.JIT
                 }
                 return LLVM.BuildStore(builder, lval, rval);
             }
+            
             void ProcessStoreLoc(BuilderStackItem stackItem, int localVariableIndex)
             {
                 var localVariableType = localVariableTypes[localVariableIndex];
@@ -959,7 +1102,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_U1] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "UNSIGNED INTEGER 1 BYTES CONVERSION IS NOT SUPPORTED");
@@ -986,7 +1128,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_U2] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "UNSIGNED INTEGER 2 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1013,7 +1154,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_U4] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "UNSIGNED INTEGER 4 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1040,7 +1180,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_U8] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "UNSIGNED INTEGER 8 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1067,7 +1206,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_I1] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "INTEGER 1 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1094,7 +1232,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_I2] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "INTEGER 2 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1129,7 +1266,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_I4] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "INTEGER 4 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1156,7 +1292,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_I8] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion To Int64
                         else
                             throw new Exception(
                                 "INTEGER 8 BYTES CONVERSION IS NOT SUPPORTED");
@@ -1185,7 +1320,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_R4] -> Popped {value.ValRef.Value} and Pushed As Float {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion to Real 32 bit
                         else
                         {
                             throw new Exception(
@@ -1216,7 +1350,6 @@ namespace PearlCLR.JIT
                             Debug(
                                 $"[Conv_R8] -> Popped {value.ValRef.Value} and Pushed As Float {stackItem.ValRef.Value} to Stack");
                         }
-                        // TODO: Support Decimal Conversion to Real 64 bit
                         else
                         {
                             throw new Exception(

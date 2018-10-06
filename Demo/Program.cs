@@ -4,9 +4,12 @@ namespace Demo
 {
     class Program
     {
-        static void Main()
+        static unsafe void Main()
         {
-            Console.WriteLine("Hello World!\n");
+            var ptr = 5;
+            int Val = 5;
+            Val += ptr;
+            Console.WriteLine("%i\n", Val);
         }
     }
 }
