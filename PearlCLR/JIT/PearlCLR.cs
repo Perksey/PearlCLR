@@ -293,15 +293,9 @@ namespace PearlCLR.JIT
             }
 
             Debug($"{method.FullName}");
-            var builderStack = new Stack<BuilderStackItem>();
-            var localVariables = new List<LLVMValueRef>();
-            var localVariableTypes = new List<TypeReference>();
-            var branchTo = new Dictionary<Instruction, LLVMBasicBlockRef>();
-            var branchToProcess = new Stack<KeyValuePair<Instruction, LLVMBasicBlockRef>>();
-            var processedBranch = new List<Instruction>();
-            LLVMTypeRef functionType;
+            var funcContext = new FunctionContext();
             if (method.HasThis)
-                functionType = LLVM.FunctionType(
+                funcContext.FunctionType = LLVM.FunctionType(
                     _context.TypeResolver.ResolveType(method.ReturnType).FieldTypeRef,
                     method.Parameters.Select(p => _context.TypeResolver.ResolveType(p.ParameterType).FieldTypeRef)
                         .Prepend(LLVM.PointerType(
@@ -309,7 +303,7 @@ namespace PearlCLR.JIT
                     false
                 );
             else
-                functionType = LLVM.FunctionType(
+                funcContext.FunctionType = LLVM.FunctionType(
                     _context.TypeResolver.ResolveType(method.ReturnType).FieldTypeRef,
                     method.Parameters.Select(p => _context.TypeResolver.ResolveType(p.ParameterType).FieldTypeRef)
                         .ToArray(),
@@ -323,7 +317,7 @@ namespace PearlCLR.JIT
             {
                 entryFunction = LLVM.AddFunction(_context.ModuleRef,
                     method.PInvokeInfo.EntryPoint ?? entryFunctionSymbol,
-                    functionType);
+                    funcContext.FunctionType);
                 if (method.PInvokeInfo.Module.Name != "__internal")
                     throw new NotSupportedException("Does not support actual P/Invoke just yet.");
 
@@ -331,7 +325,7 @@ namespace PearlCLR.JIT
                 return;
             }
 
-            entryFunction = LLVM.AddFunction(_context.ModuleRef, isMain ? "main" : entryFunctionSymbol, functionType);
+            entryFunction = LLVM.AddFunction(_context.ModuleRef, isMain ? "main" : entryFunctionSymbol, funcContext.FunctionType);
 
             var entryBlock = LLVM.AppendBasicBlock(entryFunction, "entry");
             var builder = LLVM.CreateBuilder();
@@ -341,25 +335,25 @@ namespace PearlCLR.JIT
                 Debug(local.VariableType.FullName);
                 if (local.VariableType.IsPointer)
                 {
-                    localVariableTypes.Add(local.VariableType);
+                    funcContext.LocalVariableTypes.Add(local.VariableType);
                     var alloca = LLVM.BuildAlloca(builder, _context.TypeResolver.Resolve(local.VariableType),
                         $"Alloca_{local.VariableType.Name}");
                     Debug(
                         $"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
-                    localVariables.Add(alloca);
+                    funcContext.LocalVariables.Add(alloca);
                 }
                 else if (local.VariableType.IsPrimitive)
                 {
                     var type = _context.TypeResolver.Resolve(local.VariableType);
-                    localVariableTypes.Add(local.VariableType);
+                    funcContext.LocalVariableTypes.Add(local.VariableType);
                     var alloca = LLVM.BuildAlloca(builder, type, $"Alloca_{local.VariableType.Name}");
                     Debug(
                         $"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
-                    localVariables.Add(alloca);
+                    funcContext.LocalVariables.Add(alloca);
                 }
                 else
                 {
-                    localVariableTypes.Add(local.VariableType);
+                    funcContext.LocalVariableTypes.Add(local.VariableType);
                     if (!_context.FullSymbolToTypeRef.ContainsKey(local.VariableType.FullName))
                         _context.FullSymbolToTypeRef.Add(local.VariableType.FullName,
                             _context.TypeResolver.ProcessForStruct(local.VariableType.Resolve()));
@@ -368,7 +362,7 @@ namespace PearlCLR.JIT
                         $"Alloca_{local.VariableType.MakePointerType().Name}");
                     Debug(
                         $"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
-                    localVariables.Add(alloca);
+                    funcContext.LocalVariables.Add(alloca);
                 }
             }
 
@@ -403,8 +397,8 @@ namespace PearlCLR.JIT
                 {
                     var operand = (Instruction) instruction.Operand;
                     var branch = LLVM.AppendBasicBlock(entryFunction, "branch");
-                    branchTo.TryAdd(operand, branch);
-                    branchToProcess.Push(new KeyValuePair<Instruction, LLVMBasicBlockRef>(operand, branch));
+                    funcContext.BranchTo.TryAdd(operand, branch);
+                    funcContext.BranchToProcess.Push(new KeyValuePair<Instruction, LLVMBasicBlockRef>(operand, branch));
                     Debug($"Branch to {operand}");
                 }
 
@@ -420,8 +414,8 @@ namespace PearlCLR.JIT
 
             void ProcessStoreLoc(BuilderStackItem stackItem, int localVariableIndex)
             {
-                var localVariableType = localVariableTypes[localVariableIndex];
-                var localVariable = localVariables[localVariableIndex];
+                var localVariableType = funcContext.LocalVariableTypes[localVariableIndex];
+                var localVariable = funcContext.LocalVariables[localVariableIndex];
                 //TODO: Need a better way to compare...
                 if (localVariableType.IsPointer)
                 {
@@ -453,10 +447,10 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldarg_0)
                     {
                         if (!method.HasThis)
-                            builderStack.Push(new BuilderStackItem(method.Parameters[0].ParameterType,
+                            funcContext.BuilderStack.Push(new BuilderStackItem(method.Parameters[0].ParameterType,
                                 LLVM.GetFirstParam(entryFunction)));
                         else
-                            builderStack.Push(new BuilderStackItem(method.DeclaringType,
+                            funcContext.BuilderStack.Push(new BuilderStackItem(method.DeclaringType,
                                 LLVM.GetFirstParam(entryFunction)));
 
                         Debug($"[Ldarg_0] -> {LLVM.GetFirstParam(entryFunction)} pushed to Stack");
@@ -465,7 +459,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Ldarg_1)
                     {
-                        builderStack.Push(
+                        funcContext.BuilderStack.Push(
                             new BuilderStackItem(method.Parameters[method.HasThis ? 0 : 1].ParameterType,
                                 LLVM.GetParam(entryFunction, 1)));
                         Debug($"[Ldarg_1] -> {LLVM.GetParams(entryFunction)[1]} pushed to Stack");
@@ -474,7 +468,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Ldarg_2)
                     {
-                        builderStack.Push(
+                        funcContext.BuilderStack.Push(
                             new BuilderStackItem(method.Parameters[method.HasThis ? 0 : 1].ParameterType,
                                 LLVM.GetParam(entryFunction, 2)));
                         Debug($"[Ldarg_2] -> {LLVM.GetParams(entryFunction)[2]} pushed to Stack");
@@ -483,7 +477,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Ldarg_3)
                     {
-                        builderStack.Push(
+                        funcContext.BuilderStack.Push(
                             new BuilderStackItem(method.Parameters[method.HasThis ? 0 : 1].ParameterType,
                                 LLVM.GetParam(entryFunction, 3)));
                         Debug($"[Ldarg_3] -> {LLVM.GetParams(entryFunction)[3]} pushed to Stack");
@@ -493,7 +487,7 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldarg)
                     {
                         var varDef = (VariableDefinition) instruction.Operand;
-                        builderStack.Push(new BuilderStackItem(
+                        funcContext.BuilderStack.Push(new BuilderStackItem(
                             method.Parameters[method.HasThis ? varDef.Index - 1 : varDef.Index].ParameterType,
                             LLVM.GetParam(entryFunction, (uint) varDef.Index)));
                         Debug($"[Ldarg {varDef.Index}] -> {LLVM.GetParams(entryFunction)[1]} pushed to Stack");
@@ -510,8 +504,8 @@ namespace PearlCLR.JIT
                     {
                         var def = (VariableDefinition) instruction.Operand;
                         var stackItem = new BuilderStackItem(method.Body.Variables[def.Index].VariableType,
-                            localVariables[def.Index]);
-                        builderStack.Push(stackItem);
+                            funcContext.LocalVariables[def.Index]);
+                        funcContext.BuilderStack.Push(stackItem);
                         Debug(
                             $"[Ldloca_S {def.Index}] -> Pushed Local Variable {stackItem.ValRef.Value} to Stack");
                         continue;
@@ -521,8 +515,8 @@ namespace PearlCLR.JIT
                     {
                         var def = (VariableDefinition) instruction.Operand;
                         var stackItem = new BuilderStackItem(method.Body.Variables[def.Index].VariableType,
-                            LLVM.BuildLoad(builder, localVariables[def.Index], ""));
-                        builderStack.Push(stackItem);
+                            LLVM.BuildLoad(builder, funcContext.LocalVariables[def.Index], ""));
+                        funcContext.BuilderStack.Push(stackItem);
                         Debug(
                             $"[Ldloc_S {def.Index}] -> Pushed Local Variable {stackItem.ValRef.Value} to Stack");
                         continue;
@@ -531,8 +525,8 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldloc_0)
                     {
                         var stackItem = new BuilderStackItem(method.Body.Variables[0].VariableType,
-                            LLVM.BuildLoad(builder, localVariables[0], ""));
-                        builderStack.Push(stackItem);
+                            LLVM.BuildLoad(builder, funcContext.LocalVariables[0], ""));
+                        funcContext.BuilderStack.Push(stackItem);
                         Debug($"[Ldloc_0] -> Pushed Local Variable {stackItem.ValRef.Value} to Stack");
                         continue;
                     }
@@ -540,8 +534,8 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldloc_1)
                     {
                         var stackItem = new BuilderStackItem(method.Body.Variables[1].VariableType,
-                            LLVM.BuildLoad(builder, localVariables[1], ""));
-                        builderStack.Push(stackItem);
+                            LLVM.BuildLoad(builder, funcContext.LocalVariables[1], ""));
+                        funcContext.BuilderStack.Push(stackItem);
                         Debug($"[Ldloc_1] -> Pushed Local Variable {stackItem.ValRef.Value} to Stack");
                         continue;
                     }
@@ -549,8 +543,8 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldloc_2)
                     {
                         var stackItem = new BuilderStackItem(method.Body.Variables[2].VariableType,
-                            LLVM.BuildLoad(builder, localVariables[2], ""));
-                        builderStack.Push(stackItem);
+                            LLVM.BuildLoad(builder, funcContext.LocalVariables[2], ""));
+                        funcContext.BuilderStack.Push(stackItem);
                         Debug($"[Ldloc_2] -> Pushed Local Variable {stackItem.ValRef.Value} to Stack");
                         continue;
                     }
@@ -558,15 +552,15 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldloc_3)
                     {
                         var stackItem = new BuilderStackItem(method.Body.Variables[3].VariableType,
-                            LLVM.BuildLoad(builder, localVariables[3], ""));
-                        builderStack.Push(stackItem);
+                            LLVM.BuildLoad(builder, funcContext.LocalVariables[3], ""));
+                        funcContext.BuilderStack.Push(stackItem);
                         Debug($"[Ldloc_3] -> Pushed Local Variable {stackItem.ValRef.Value} to Stack");
                         continue;
                     }
 
                     if (instruction.OpCode == OpCodes.Ldind_U1)
                     {
-                        var val = builderStack.Pop();
+                        var val = funcContext.BuilderStack.Pop();
                         LLVMValueRef cast;
                         if (val.Type.IsPointer)
                             cast = LLVM.BuildPtrToInt(builder, LLVM.BuildLoad(builder, val.ValRef.Value, ""),
@@ -574,7 +568,7 @@ namespace PearlCLR.JIT
                         else
                             cast = LLVM.BuildZExt(builder, LLVM.BuildLoad(builder, val.ValRef.Value, ""),
                                 LLVM.Int32Type(), "");
-                        builderStack.Push(new BuilderStackItem
+                        funcContext.BuilderStack.Push(new BuilderStackItem
                         {
                             Type = MiniBCL.Int32Type,
                             TypeRef = LLVM.Int32Type(),
@@ -587,13 +581,13 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Ldind_I)
                     {
-                        var val = builderStack.Pop();
+                        var val = funcContext.BuilderStack.Pop();
                         // TODO: Support Native Integer conversion
                         LLVMValueRef cast;
                         if (val.Type.IsPointer)
                         {
                             cast = LLVM.BuildLoad(builder, val.ValRef.Value, "");
-                            builderStack.Push(new BuilderStackItem
+                            funcContext.BuilderStack.Push(new BuilderStackItem
                             {
                                 Type = ((PointerType) val.Type).ElementType,
                                 TypeRef = cast.TypeOf(),
@@ -605,7 +599,7 @@ namespace PearlCLR.JIT
                             cast = LLVM.BuildZExt(builder,
                                 LLVM.BuildLoad(builder, val.ValRef.Value, $"Load_{val.Type.Name}"),
                                 LLVM.Int64Type(), "");
-                            builderStack.Push(new BuilderStackItem
+                            funcContext.BuilderStack.Push(new BuilderStackItem
                             {
                                 Type = MiniBCL.Int64Type,
                                 TypeRef = LLVM.Int64Type(),
@@ -620,7 +614,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Initobj)
                     {
-                        var item = builderStack.Pop();
+                        var item = funcContext.BuilderStack.Pop();
                         Debug($"[Initobj] -> Popped Stack Item {item.ValRef.Value}");
                         continue;
                     }
@@ -630,7 +624,7 @@ namespace PearlCLR.JIT
                         var operand = (int) instruction.Operand;
                         var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), (ulong) operand,
                             true);
-                        builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
+                        funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4 {operand}] -> Pushed {stackItem} to Stack");
                         continue;
@@ -641,7 +635,7 @@ namespace PearlCLR.JIT
                         var operand = (sbyte) instruction.Operand;
                         var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), (ulong) operand,
                             true);
-                        builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
+                        funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_S {operand}] -> Pushed {stackItem} to Stack");
                         continue;
@@ -650,7 +644,7 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldc_I4_0)
                     {
                         var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 0, true);
-                        builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
+                        funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_0] -> Pushed {stackItem} to Stack");
                         continue;
@@ -659,7 +653,7 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldc_I4_1)
                     {
                         var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 1, true);
-                        builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
+                        funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_1] -> Pushed {stackItem} to Stack");
                         continue;
@@ -668,7 +662,7 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldc_I4_2)
                     {
                         var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 2, true);
-                        builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
+                        funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_2] -> Pushed {stackItem} to Stack");
                         continue;
@@ -677,7 +671,7 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldc_I4_3)
                     {
                         var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 3, true);
-                        builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
+                        funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_3] -> Pushed {stackItem} to Stack");
                         continue;
@@ -686,7 +680,7 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldc_I4_4)
                     {
                         var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 4, true);
-                        builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
+                        funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_4] -> Pushed {stackItem} to Stack");
                         continue;
@@ -695,7 +689,7 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldc_I4_5)
                     {
                         var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 5, true);
-                        builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
+                        funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_5] -> Pushed {stackItem} to Stack");
                         continue;
@@ -704,7 +698,7 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldc_I4_6)
                     {
                         var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 6, true);
-                        builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
+                        funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_6] -> Pushed {stackItem} to Stack");
                         continue;
@@ -713,7 +707,7 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldc_I4_7)
                     {
                         var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 7, true);
-                        builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
+                        funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_7] -> Pushed {stackItem} to Stack");
                         continue;
@@ -722,7 +716,7 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldc_I4_8)
                     {
                         var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 8, true);
-                        builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
+                        funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_8] -> Pushed {stackItem} to Stack");
                         continue;
@@ -731,8 +725,8 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Dup)
                     {
                         Debug("Attempting Dup");
-                        var stackItem = builderStack.Peek();
-                        builderStack.Push(stackItem);
+                        var stackItem = funcContext.BuilderStack.Peek();
+                        funcContext.BuilderStack.Push(stackItem);
                         Debug($"[Dup] -> Pushed a Duplicate of {stackItem.ValRef.Value} onto Stack");
                         continue;
                     }
@@ -743,7 +737,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), (ulong) -1,
                                 true);
-                            builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
+                            funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                                 stackItem));
                             Debug($"[Ldc_I4_M1] -> Pushed {stackItem} to Stack");
                         }
@@ -756,7 +750,7 @@ namespace PearlCLR.JIT
                         var stackItem = new BuilderStackItem(MiniBCL.Int64Type,
                             LLVM.ConstInt(LLVM.Int64TypeInContext(_context.ContextRef), (ulong) instruction.Operand,
                                 new LLVMBool(1)));
-                        builderStack.Push(stackItem);
+                        funcContext.BuilderStack.Push(stackItem);
                         Debug($"[Ldc_I8] -> Pushed {stackItem.ValRef.Value} to Stack");
                         continue;
                     }
@@ -765,7 +759,7 @@ namespace PearlCLR.JIT
                     {
                         var stackItem = new BuilderStackItem(MiniBCL.FloatType,
                             LLVM.ConstReal(LLVM.FloatTypeInContext(_context.ContextRef), (double) instruction.Operand));
-                        builderStack.Push(stackItem);
+                        funcContext.BuilderStack.Push(stackItem);
                         Debug($"[Ldc_R4] -> Pushed {stackItem.ValRef.Value} to Stack");
                         continue;
                     }
@@ -775,7 +769,7 @@ namespace PearlCLR.JIT
                         var stackItem = new BuilderStackItem(MiniBCL.DoubleType,
                             LLVM.ConstReal(LLVM.DoubleTypeInContext(_context.ContextRef),
                                 (double) instruction.Operand));
-                        builderStack.Push(stackItem);
+                        funcContext.BuilderStack.Push(stackItem);
                         Debug($"[Ldc_R8] -> Pushed {stackItem.ValRef.Value} to Stack");
                         continue;
                     }
@@ -784,7 +778,7 @@ namespace PearlCLR.JIT
                     {
                         var stackItem = new BuilderStackItem(MiniBCL.Int64Type,
                             LLVM.ConstNull(LLVM.PointerType(LLVM.Int8Type(), 0)));
-                        builderStack.Push(stackItem);
+                        funcContext.BuilderStack.Push(stackItem);
                         Debug($"[Ldnull] -> Pushed {stackItem.ValRef.Value} to Stack");
                         continue;
                     }
@@ -799,7 +793,7 @@ namespace PearlCLR.JIT
                         var stackItem =
                             new BuilderStackItem(operand.ReturnType.Resolve(),
                                 _context.SymbolToCallableFunction[symbol]);
-                        builderStack.Push(stackItem);
+                        funcContext.BuilderStack.Push(stackItem);
                         Debug($"[Ldftn {stackItem.Type}] -> Pushed {stackItem.ValRef.Value} to Stack");
                         continue;
                     }
@@ -816,19 +810,19 @@ namespace PearlCLR.JIT
                             valRef = LLVM.BuildAlloca(builder,
                                 _context.FullSymbolToTypeRef[operand.DeclaringType.FullName].StructTypeRef,
                                 $"Alloc_{operand.DeclaringType.Name}");
-                        builderStack.Push(new BuilderStackItem(operand.DeclaringType, valRef));
-                        ProcessCall(instruction, builder, indent, builderStack);
-                        builderStack.Push(new BuilderStackItem(operand.DeclaringType, valRef));
+                        funcContext.BuilderStack.Push(new BuilderStackItem(operand.DeclaringType, valRef));
+                        ProcessCall(instruction, builder, indent, funcContext.BuilderStack);
+                        funcContext.BuilderStack.Push(new BuilderStackItem(operand.DeclaringType, valRef));
                         Debug(
-                            $"[Newobj {operand.FullName}] -> Called Ctor and pushed {builderStack.Peek().ValRef.Value} to stack");
+                            $"[Newobj {operand.FullName}] -> Called Ctor and pushed {funcContext.BuilderStack.Peek().ValRef.Value} to stack");
                         continue;
                     }
 
                     if (instruction.OpCode == OpCodes.Stind_I1)
                     {
-                        var val = builderStack.Pop();
+                        var val = funcContext.BuilderStack.Pop();
                         var cast = LLVM.BuildZExt(builder, val.ValRef.Value, LLVM.Int8Type(), "");
-                        var address = builderStack.Pop();
+                        var address = funcContext.BuilderStack.Pop();
                         var ptr = address.ValRef.Value;
                         if (address.ValRef.Value.TypeOf().TypeKind != LLVMTypeKind.LLVMPointerTypeKind)
                             ptr = LLVM.BuildIntToPtr(builder, address.ValRef.Value,
@@ -842,12 +836,12 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Conv_I)
                     {
-                        var value = builderStack.Pop();
+                        var value = funcContext.BuilderStack.Pop();
                         if (IsTypeARealNumber(value.Type))
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.Int32Type,
                                 LLVM.BuildFPToUI(builder, value.ValRef.Value, LLVM.Int8Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_U1] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -855,7 +849,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.Int32Type,
                                 LLVM.BuildZExt(builder, value.ValRef.Value, LLVM.Int8Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_U1] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -871,12 +865,12 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Conv_U1)
                     {
-                        var value = builderStack.Pop();
+                        var value = funcContext.BuilderStack.Pop();
                         if (IsTypeARealNumber(value.Type))
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.UInt8Type,
                                 LLVM.BuildFPToUI(builder, value.ValRef.Value, LLVM.Int8Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_U1] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -884,7 +878,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.UInt8Type,
                                 LLVM.BuildZExt(builder, value.ValRef.Value, LLVM.Int8Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_U1] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -899,12 +893,12 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Conv_U2)
                     {
-                        var value = builderStack.Pop();
+                        var value = funcContext.BuilderStack.Pop();
                         if (IsTypeARealNumber(value.Type))
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.UInt16Type,
                                 LLVM.BuildFPToUI(builder, value.ValRef.Value, LLVM.Int16Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_U2] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -912,7 +906,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.UInt16Type,
                                 LLVM.BuildZExt(builder, value.ValRef.Value, LLVM.Int16Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_U2] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -927,12 +921,12 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Conv_U4)
                     {
-                        var value = builderStack.Pop();
+                        var value = funcContext.BuilderStack.Pop();
                         if (IsTypeARealNumber(value.Type))
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.UInt32Type,
                                 LLVM.BuildFPToUI(builder, value.ValRef.Value, LLVM.Int32Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_U4] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -940,7 +934,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.UInt32Type,
                                 LLVM.BuildZExt(builder, value.ValRef.Value, LLVM.Int32Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_U4] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -955,12 +949,12 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Conv_U8)
                     {
-                        var value = builderStack.Pop();
+                        var value = funcContext.BuilderStack.Pop();
                         if (IsTypeARealNumber(value.Type))
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.UInt64Type,
                                 LLVM.BuildFPToUI(builder, value.ValRef.Value, LLVM.Int64Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_U8] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -968,7 +962,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.UInt64Type,
                                 LLVM.BuildZExt(builder, value.ValRef.Value, LLVM.Int64Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_U8] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -983,12 +977,12 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Conv_I1)
                     {
-                        var value = builderStack.Pop();
+                        var value = funcContext.BuilderStack.Pop();
                         if (IsTypeARealNumber(value.Type))
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.Int8Type,
                                 LLVM.BuildFPToSI(builder, value.ValRef.Value, LLVM.Int8Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_I1] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -996,7 +990,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.Int8Type,
                                 LLVM.BuildZExt(builder, value.ValRef.Value, LLVM.Int8Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_I1] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -1011,12 +1005,12 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Conv_I2)
                     {
-                        var value = builderStack.Pop();
+                        var value = funcContext.BuilderStack.Pop();
                         if (IsTypeARealNumber(value.Type))
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.Int16Type,
                                 LLVM.BuildFPToSI(builder, value.ValRef.Value, LLVM.Int16Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_I2] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -1024,7 +1018,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.Int16Type,
                                 LLVM.BuildZExt(builder, value.ValRef.Value, LLVM.Int16Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_I2] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -1039,12 +1033,12 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Conv_I4)
                     {
-                        var value = builderStack.Pop();
+                        var value = funcContext.BuilderStack.Pop();
                         if (value.Type.IsPointer)
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.Int32Type,
                                 LLVM.BuildPtrToInt(builder, value.ValRef.Value, LLVM.Int32Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_I4] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -1052,7 +1046,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.Int32Type,
                                 LLVM.BuildFPToSI(builder, value.ValRef.Value, LLVM.Int32Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_I4] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -1060,7 +1054,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.Int32Type,
                                 LLVM.BuildZExt(builder, value.ValRef.Value, LLVM.Int32Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_I4] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -1075,12 +1069,12 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Conv_I8)
                     {
-                        var value = builderStack.Pop();
+                        var value = funcContext.BuilderStack.Pop();
                         if (IsTypeARealNumber(value.Type))
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.Int64Type,
                                 LLVM.BuildFPToSI(builder, value.ValRef.Value, LLVM.Int64Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_I8] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -1088,7 +1082,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.Int64Type,
                                 LLVM.BuildZExt(builder, value.ValRef.Value, LLVM.Int64Type(), ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_I8] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
@@ -1103,14 +1097,14 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Conv_R4)
                     {
-                        var value = builderStack.Pop();
+                        var value = funcContext.BuilderStack.Pop();
                         if (IsTypeAnInteger(value.Type))
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.FloatType,
                                 LLVM.BuildSIToFP(builder, value.ValRef.Value,
                                     LLVM.FloatTypeInContext(_context.ContextRef),
                                     ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_R4] -> Popped {value.ValRef.Value} and Pushed As Float {stackItem.ValRef.Value} to Stack");
                         }
@@ -1120,7 +1114,7 @@ namespace PearlCLR.JIT
                                 LLVM.BuildFPCast(builder, value.ValRef.Value,
                                     LLVM.FloatTypeInContext(_context.ContextRef),
                                     ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_R4] -> Popped {value.ValRef.Value} and Pushed As Float {stackItem.ValRef.Value} to Stack");
                         }
@@ -1135,14 +1129,14 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Conv_R8)
                     {
-                        var value = builderStack.Pop();
+                        var value = funcContext.BuilderStack.Pop();
                         if (IsTypeAnInteger(value.Type))
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.DoubleType,
                                 LLVM.BuildSIToFP(builder, value.ValRef.Value,
                                     LLVM.DoubleTypeInContext(_context.ContextRef),
                                     ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_R8] -> Popped {value.ValRef.Value} and Pushed As Float {stackItem.ValRef.Value} to Stack");
                         }
@@ -1152,7 +1146,7 @@ namespace PearlCLR.JIT
                                 LLVM.BuildFPCast(builder, value.ValRef.Value,
                                     LLVM.DoubleTypeInContext(_context.ContextRef),
                                     ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Conv_R8] -> Popped {value.ValRef.Value} and Pushed As Float {stackItem.ValRef.Value} to Stack");
                         }
@@ -1168,8 +1162,8 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Stfld)
                     {
                         var fieldDef = (FieldDefinition) instruction.Operand;
-                        var value = builderStack.Pop();
-                        var structRef = builderStack.Pop();
+                        var value = funcContext.BuilderStack.Pop();
+                        var structRef = funcContext.BuilderStack.Pop();
                         if (value.ValRef.Value.IsNull())
                             throw new Exception(
                                 "The Value/Reference returned as null thus cannot be stored in Struct!");
@@ -1195,28 +1189,28 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Stloc_0)
                     {
-                        var val = builderStack.Pop();
+                        var val = funcContext.BuilderStack.Pop();
                         ProcessStoreLoc(val, 0);
                         continue;
                     }
 
                     if (instruction.OpCode == OpCodes.Stloc_1)
                     {
-                        var val = builderStack.Pop();
+                        var val = funcContext.BuilderStack.Pop();
                         ProcessStoreLoc(val, 1);
                         continue;
                     }
 
                     if (instruction.OpCode == OpCodes.Stloc_2)
                     {
-                        var val = builderStack.Pop();
+                        var val = funcContext.BuilderStack.Pop();
                         ProcessStoreLoc(val, 2);
                         continue;
                     }
 
                     if (instruction.OpCode == OpCodes.Stloc_3)
                     {
-                        var val = builderStack.Pop();
+                        var val = funcContext.BuilderStack.Pop();
                         ProcessStoreLoc(val, 3);
                         continue;
                     }
@@ -1224,7 +1218,7 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Stloc_S)
                     {
                         var index = (VariableDefinition) instruction.Operand;
-                        var val = builderStack.Pop();
+                        var val = funcContext.BuilderStack.Pop();
                         ProcessStoreLoc(val, index.Index);
                         continue;
                     }
@@ -1232,7 +1226,7 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldfld)
                     {
                         var fieldDef = (FieldDefinition) instruction.Operand;
-                        var structRef = builderStack.Pop();
+                        var structRef = funcContext.BuilderStack.Pop();
                         if (!structRef.ValRef.HasValue)
                             throw new Exception(
                                 "The Value/Reference returned as null thus cannot be stored in Struct!");
@@ -1244,7 +1238,7 @@ namespace PearlCLR.JIT
                                 _context.FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs
                                     .First(I => I.Name == fieldDef.Name)), $"Offset_{fieldDef.Name}");
                         var item = new BuilderStackItem(fieldDef.FieldType, LLVM.BuildLoad(builder, offset, ""));
-                        builderStack.Push(item);
+                        funcContext.BuilderStack.Push(item);
                         Debug(
                             $"[Ldfld {fieldDef.FullName}] -> Popped {structRef.ValRef.Value} off stack and pushed {item.ValRef.Value} to stack");
                         continue;
@@ -1255,7 +1249,7 @@ namespace PearlCLR.JIT
                         var val = (string) instruction.Operand;
                         var ldstr = LLVM.BuildGlobalStringPtr(builder, val, "");
                         var stackItem = new BuilderStackItem(MiniBCL.StringType, ldstr);
-                        builderStack.Push(stackItem);
+                        funcContext.BuilderStack.Push(stackItem);
                         Debug($"[Ldstr {val}] -> Pushed {ldstr.TypeOf()} to Stack");
                         continue;
                     }
@@ -1263,15 +1257,15 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Callvirt ||
                         instruction.OpCode == OpCodes.Call)
                     {
-                        ProcessCall(instruction, builder, indent, builderStack);
+                        ProcessCall(instruction, builder, indent, funcContext.BuilderStack);
                         continue;
                     }
 
                     if (instruction.OpCode == OpCodes.Add)
                     {
                         // TODO: Support conversion between Floating Point and Integers
-                        var rval = builderStack.Pop();
-                        var lval = builderStack.Pop();
+                        var rval = funcContext.BuilderStack.Pop();
+                        var lval = funcContext.BuilderStack.Pop();
                         if (IsTypeAnInteger(lval.Type) && IsTypeAnInteger(rval.Type))
                         {
                             // TODO: Need to determine the size of pointer.
@@ -1289,7 +1283,7 @@ namespace PearlCLR.JIT
 
                             var stackItem = new BuilderStackItem(lval.Type,
                                 LLVM.BuildAdd(builder, actualLVal, actualRVal, ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Add] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value.TypeOf()} and Pushed {stackItem.ValRef.Value}");
                         }
@@ -1297,7 +1291,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(lval.Type,
                                 LLVM.BuildFAdd(builder, lval.ValRef.Value, rval.ValRef.Value, ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Add] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                         }
@@ -1312,8 +1306,8 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Sub)
                     {
                         // TODO: Support conversion between Floating Point and Integers
-                        var rval = builderStack.Pop();
-                        var lval = builderStack.Pop();
+                        var rval = funcContext.BuilderStack.Pop();
+                        var lval = funcContext.BuilderStack.Pop();
                         if (IsTypeAnInteger(lval.Type) && IsTypeAnInteger(rval.Type))
                         {
                             // TODO: Need to determine the size of pointer.
@@ -1331,7 +1325,7 @@ namespace PearlCLR.JIT
 
                             var stackItem = new BuilderStackItem(lval.Type,
                                 LLVM.BuildSub(builder, actualLVal, actualRVal, ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                         }
@@ -1339,7 +1333,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(lval.Type,
                                 LLVM.BuildFSub(builder, lval.ValRef.Value, rval.ValRef.Value, ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                         }
@@ -1354,8 +1348,8 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Mul)
                     {
                         // TODO: Support conversion between Floating Point and Integers
-                        var rval = builderStack.Pop();
-                        var lval = builderStack.Pop();
+                        var rval = funcContext.BuilderStack.Pop();
+                        var lval = funcContext.BuilderStack.Pop();
                         if (IsTypeAnInteger(lval.Type) && IsTypeAnInteger(rval.Type))
                         {
                             // TODO: Need to determine the size of pointer.
@@ -1373,7 +1367,7 @@ namespace PearlCLR.JIT
 
                             var stackItem = new BuilderStackItem(lval.Type,
                                 LLVM.BuildMul(builder, actualLVal, actualRVal, ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                         }
@@ -1381,7 +1375,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(lval.Type,
                                 LLVM.BuildFMul(builder, lval.ValRef.Value, rval.ValRef.Value, ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                         }
@@ -1396,8 +1390,8 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Div)
                     {
                         // TODO: Support conversion between Floating Point and Integers
-                        var rval = builderStack.Pop();
-                        var lval = builderStack.Pop();
+                        var rval = funcContext.BuilderStack.Pop();
+                        var lval = funcContext.BuilderStack.Pop();
                         if (IsTypeAnInteger(lval.Type) && IsTypeAnInteger(rval.Type))
                         {
                             // TODO: Need to determine the size of pointer.
@@ -1415,7 +1409,7 @@ namespace PearlCLR.JIT
 
                             var stackItem = new BuilderStackItem(lval.Type,
                                 LLVM.BuildSDiv(builder, actualLVal, actualRVal, ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                         }
@@ -1423,7 +1417,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(lval.Type,
                                 LLVM.BuildFDiv(builder, lval.ValRef.Value, rval.ValRef.Value, ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                         }
@@ -1438,8 +1432,8 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Rem)
                     {
                         // TODO: Support conversion between Floating Point and Integers
-                        var rval = builderStack.Pop();
-                        var lval = builderStack.Pop();
+                        var rval = funcContext.BuilderStack.Pop();
+                        var lval = funcContext.BuilderStack.Pop();
                         if (IsTypeAnInteger(lval.Type) && IsTypeAnInteger(rval.Type))
                         {
                             // TODO: Need to determine the size of pointer.
@@ -1457,7 +1451,7 @@ namespace PearlCLR.JIT
 
                             var stackItem = new BuilderStackItem(lval.Type,
                                 LLVM.BuildSRem(builder, actualLVal, actualRVal, ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                         }
@@ -1465,7 +1459,7 @@ namespace PearlCLR.JIT
                         {
                             var stackItem = new BuilderStackItem(lval.Type,
                                 LLVM.BuildFRem(builder, lval.ValRef.Value, rval.ValRef.Value, ""));
-                            builderStack.Push(stackItem);
+                            funcContext.BuilderStack.Push(stackItem);
                             Debug(
                                 $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                         }
@@ -1486,8 +1480,8 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Clt)
                     {
-                        var rval = builderStack.Pop().ValRef.Value;
-                        var lval = builderStack.Pop().ValRef.Value;
+                        var rval = funcContext.BuilderStack.Pop().ValRef.Value;
+                        var lval = funcContext.BuilderStack.Pop().ValRef.Value;
                         var rvalType = rval.TypeOf();
                         var lvalType = lval.TypeOf();
                         if (!rvalType.Equals(lvalType)) rval = AutoCast(builder, rval, lvalType);
@@ -1503,14 +1497,14 @@ namespace PearlCLR.JIT
                             throw new NotImplementedException(
                                 $"No comparision supported for those types: {lval} < {rval}");
 
-                        builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type, cmp));
+                        funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type, cmp));
                         continue;
                     }
 
                     if (instruction.OpCode == OpCodes.Cgt)
                     {
-                        var rval = builderStack.Pop().ValRef.Value;
-                        var lval = builderStack.Pop().ValRef.Value;
+                        var rval = funcContext.BuilderStack.Pop().ValRef.Value;
+                        var lval = funcContext.BuilderStack.Pop().ValRef.Value;
                         var rvalType = rval.TypeOf();
                         var lvalType = lval.TypeOf();
                         if (!rvalType.Equals(lvalType)) rval = AutoCast(builder, rval, lvalType);
@@ -1526,14 +1520,14 @@ namespace PearlCLR.JIT
                             throw new NotImplementedException(
                                 $"No comparision supported for those types: {lval} < {rval}");
 
-                        builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type, cmp));
+                        funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type, cmp));
                         continue;
                     }
 
                     if (instruction.OpCode == OpCodes.Ceq)
                     {
-                        var rval = builderStack.Pop().ValRef.Value;
-                        var lval = builderStack.Pop().ValRef.Value;
+                        var rval = funcContext.BuilderStack.Pop().ValRef.Value;
+                        var lval = funcContext.BuilderStack.Pop().ValRef.Value;
                         var rvalType = rval.TypeOf();
                         var lvalType = lval.TypeOf();
                         if (!rvalType.Equals(lvalType)) rval = AutoCast(builder, rval, lvalType);
@@ -1549,7 +1543,7 @@ namespace PearlCLR.JIT
                             throw new NotImplementedException(
                                 $"No comparision supported for those types: {lval} == {rval}");
 
-                        builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type, cmp));
+                        funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type, cmp));
                         continue;
                     }
 
@@ -1557,7 +1551,7 @@ namespace PearlCLR.JIT
                         instruction.OpCode == OpCodes.Br_S)
                     {
                         var operand = (Instruction) instruction.Operand;
-                        var branchToBlock = branchTo[operand];
+                        var branchToBlock = funcContext.BranchTo[operand];
                         LLVM.BuildBr(builder, branchToBlock);
                         Debug(
                             $"[{instruction.OpCode} {operand}] -> Conditionally Redirect Control Context to Branch, terminating this block.");
@@ -1566,10 +1560,10 @@ namespace PearlCLR.JIT
 
                     void AddBlockToProcess()
                     {
-                        if (processedBranch.Contains(instruction.Next))
+                        if (funcContext.ProcessedBranch.Contains(instruction.Next))
                         {
-                            branchTo.Add(instruction.Next, entryBlock);
-                            branchToProcess.Push(
+                            funcContext.BranchTo.Add(instruction.Next, entryBlock);
+                            funcContext.BranchToProcess.Push(
                                 new KeyValuePair<Instruction, LLVMBasicBlockRef>(instruction.Next, entryBlock));
                         }
                     }
@@ -1630,10 +1624,10 @@ namespace PearlCLR.JIT
                         else
                             throw new BadImageFormatException();
 
-                        var rval = builderStack.Pop();
-                        var lval = builderStack.Pop();
+                        var rval = funcContext.BuilderStack.Pop();
+                        var lval = funcContext.BuilderStack.Pop();
                         var operand = (Instruction) instruction.Operand;
-                        var branchToBlock = branchTo[operand];
+                        var branchToBlock = funcContext.BranchTo[operand];
                         entryBlock = LLVM.AppendBasicBlock(entryFunction, "branch");
 
                         var cmp = LLVM.BuildICmp(builder, intCmp, lval.ValRef.Value,
@@ -1643,14 +1637,14 @@ namespace PearlCLR.JIT
                             cmp,
                             entryBlock, branchToBlock);
 
-                        if (branchTo.ContainsKey(instruction.Next))
+                        if (funcContext.BranchTo.ContainsKey(instruction.Next))
                             break;
 
                         LLVM.PositionBuilderAtEnd(builder, entryBlock);
                         AddBlockToProcess();
 
                         Debug(
-                            $"[{instruction.OpCode} {operand}] -> Popped {lval} and {rval} and pushed {cmp} and branched to {branchTo}");
+                            $"[{instruction.OpCode} {operand}] -> Popped {lval} and {rval} and pushed {cmp} and branched to {funcContext.BranchTo}");
                         continue;
                     }
 
@@ -1660,9 +1654,9 @@ namespace PearlCLR.JIT
                         instruction.OpCode == OpCodes.Brtrue ||
                         instruction.OpCode == OpCodes.Brtrue_S)
                     {
-                        var lval = builderStack.Pop();
+                        var lval = funcContext.BuilderStack.Pop();
                         var operand = (Instruction) instruction.Operand;
-                        var branchToBlock = branchTo[operand];
+                        var branchToBlock = funcContext.BranchTo[operand];
                         entryBlock = LLVM.AppendBasicBlock(entryFunction, "branch");
                         LLVMValueRef rval;
                         if (instruction.OpCode == OpCodes.Brtrue ||
@@ -1677,7 +1671,7 @@ namespace PearlCLR.JIT
                         LLVM.BuildCondBr(builder,
                             cmp,
                             entryBlock, branchToBlock);
-                        if (branchTo.ContainsKey(instruction.Next))
+                        if (funcContext.BranchTo.ContainsKey(instruction.Next))
                         {
                             break;
                         }
@@ -1699,7 +1693,7 @@ namespace PearlCLR.JIT
                             break;
                         }
 
-                        var val = builderStack.Pop();
+                        var val = funcContext.BuilderStack.Pop();
                         var ret = LLVM.BuildRet(builder, val.ValRef.Value);
                         Debug(
                             $"[Ret {method.ReturnType.FullName}] -> Popped {val.ValRef.Value} from Stack and Build Return with {ret}");
@@ -1713,17 +1707,17 @@ namespace PearlCLR.JIT
 
             var first = method.Body.Instructions.First();
             ProcessInstructions(first);
-            processedBranch.Add(first);
-            while (branchToProcess.Count > 0)
+            funcContext.ProcessedBranch.Add(first);
+            while (funcContext.BranchToProcess.Count > 0)
             {
-                var item = branchToProcess.Pop();
+                var item = funcContext.BranchToProcess.Pop();
                 var terminator = item.Value.GetBasicBlockTerminator();
                 if (terminator.Pointer != IntPtr.Zero)
                     continue;
                 LLVM.PositionBuilderAtEnd(builder, item.Value);
                 entryBlock = item.Value;
                 ProcessInstructions(item.Key);
-                processedBranch.Add(item.Key);
+                funcContext.ProcessedBranch.Add(item.Key);
             }
 
             entryFunction.Dump();
