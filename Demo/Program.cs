@@ -2,12 +2,12 @@
 
 namespace Demo
 {
-    class Program
+    internal class Program
     {
-        static unsafe void Main()
+        private static void Main()
         {
             var ptr = 5;
-            int Val = 5;
+            var Val = 5;
             Val += ptr;
             Console.WriteLine("%i\n", Val);
         }

@@ -3,9 +3,9 @@ using System.IO;
 
 namespace PearlCLRRunner
 {
-    static class Program
+    internal static class Program
     {
-        static void Main(string[] args)
+        private static void Main(string[] args)
         {
             Console.WriteLine("Attempting to Process Demo.dll");
             var jitter = new PearlCLR.JIT.PearlCLR(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Demo.dll"));
