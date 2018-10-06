@@ -1,35 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography.X509Certificates;
-using Mono.Cecil;
 using LLVMSharp;
+using Mono.Cecil;
 using Mono.Cecil.Cil;
 using Mono.Cecil.Rocks;
 using NLog;
-using OpCodes = Mono.Cecil.Cil.OpCodes;
 
 namespace PearlCLR.JIT
 {
     public class PearlCLR
     {
-        /// <summary>
-        /// This assume we have the BCL aka System namespace library
-        /// </summary>
-        private AssemblyDefinition assembly { get; }
-
-        private Logger clrLogger { get; set; }
-        private readonly LLVMModuleRef llvmModuleRef;
-        private readonly LLVMContextRef llvmContextRef;
-        private readonly LLVMTypeResolver _llvmTypeResolver;
-        private LLVMExecutionEngineRef llvmEngineRef;
-        private Dictionary<string, StructDefinition> FullSymbolToTypeRef { get; }
-        private Dictionary<string, LLVMValueRef> SymbolToCallableFunction { get; }
-        private Dictionary<string, LLVMTypeRef> SymbolToFunctionPointerProto { get; }
-        private JITCompilerOptions _options { get; } = new JITCompilerOptions();
         public PearlCLR(string file, string target = null)
         {
             assembly = AssemblyDefinition.ReadAssembly(file);
@@ -39,66 +21,41 @@ namespace PearlCLR.JIT
             LLVM.InitializeX86AsmParser();
             LLVM.InitializeX86AsmPrinter();
 
-            FullSymbolToTypeRef = new Dictionary<string, StructDefinition>();
-            SymbolToCallableFunction = new Dictionary<string, LLVMValueRef>();
-            SymbolToFunctionPointerProto = new Dictionary<string, LLVMTypeRef>();
-
-            llvmModuleRef = LLVM.ModuleCreateWithName("PearlCLRModule");
-            llvmContextRef = LLVM.GetModuleContext(llvmModuleRef);
-            LLVM.SetTarget(llvmModuleRef, "x86_64-pc-windows-gnu");
-            var targetRef = LLVM.GetFirstTarget();
-            var targetMachine = LLVM.CreateTargetMachine(targetRef, "x86_64-pc-windows-gnu", "", "",
-                LLVMCodeGenOptLevel.LLVMCodeGenLevelAggressive, LLVMRelocMode.LLVMRelocDefault,
-                LLVMCodeModel.LLVMCodeModelDefault);
-            var targetData = LLVM.CreateTargetDataLayout(targetMachine);
-            var size = LLVM.ABISizeOfType(targetData, LLVM.PointerType(LLVM.VoidType(), 0));
-            clrLogger = LogManager.GetCurrentClassLogger();
-            _llvmTypeResolver = new LLVMTypeResolver(_options.CStringMode, FullSymbolToTypeRef);            
-            clrLogger.Debug($"Pointer Size: {size}");
-        }
-
-        public string TargetByPlatform()
-        {
-            switch (Environment.OSVersion.Platform)
+            _context = new JITContext
             {
-                case PlatformID.Unix:
-                {
-                    if (Environment.Is64BitProcess)
-                        return "x86_64-pc-windows-gnu";
-                    else
-                        return "x86-pc-";
-                }
-                case PlatformID.Win32S:
-                case PlatformID.Win32Windows:
-                case PlatformID.Win32NT:
-                case PlatformID.WinCE:
-                {
-                    return "";
-                }
-                case PlatformID.MacOSX:
-                {
-                    return "";
-                }
-                default:
-                    return "";
-            }
+                ModuleRef = LLVM.ModuleCreateWithName("PearlCLRModule"),
+                ContextRef = LLVM.GetModuleContext(_context.ModuleRef),
+                CLRLogger = LogManager.GetCurrentClassLogger(),
+                TypeResolver = new LLVMTypeResolver(_context)
+            };
         }
+
+        /// <summary>
+        ///     This assume we have the BCL aka System namespace library
+        /// </summary>
+        private AssemblyDefinition assembly { get; }
+
+        private JITCompilerOptions _options { get; } = new JITCompilerOptions();
+        private JITContext _context { get; }
 
         private void AddBCLObjects()
         {
-            StructDefinition structDef = new StructDefinition();
+            var structDef = new StructDefinition();
 
             if (_options.MetadataTypeHandlingModeOption == MetadataTypeHandlingMode.Full_Fixed)
             {
                 // C# Fields are going to be seen as Int32, but it may not necessarily be 32 bit integer,
                 // What is important is the specified type information in LLVM.
                 // This is intended to allow a more flexible optimization feature.
-                structDef.CS_FieldDefs = new [] {
+                structDef.CS_FieldDefs = new[]
+                {
                     new FieldDefinition("___INTERNAL__DO_NOT_TOUCH__CLR__TYPEHANDLE",
-                    FieldAttributes.SpecialName | FieldAttributes.Private | FieldAttributes.CompilerControlled,
-                    MiniBCL.Int32Type), new FieldDefinition("___INTERNAL__DO_NOT_TOUCH__CLR__SYNC",
-                    FieldAttributes.SpecialName | FieldAttributes.Private | FieldAttributes.CompilerControlled,
-                    MiniBCL.Int32Type)};
+                        FieldAttributes.SpecialName | FieldAttributes.Private | FieldAttributes.CompilerControlled,
+                        MiniBCL.Int32Type),
+                    new FieldDefinition("___INTERNAL__DO_NOT_TOUCH__CLR__SYNC",
+                        FieldAttributes.SpecialName | FieldAttributes.Private | FieldAttributes.CompilerControlled,
+                        MiniBCL.Int32Type)
+                };
 
                 structDef.CS_StructName = "Object";
                 structDef.LL_StructName = "Object";
@@ -109,13 +66,15 @@ namespace PearlCLR.JIT
                     new LLVMFieldDefAndRef(MiniBCL.Int32Type, LLVM.IntType(_options.MetadataFixedLength))
                 };
 
-                structDef.StructTypeRef = LLVM.StructType(structDef.LL_FieldTypeRefs.Select(I => I.FieldTypeRef).ToArray(), true);
-                
-                FullSymbolToTypeRef.Add("System.Object", structDef);
-                
-                SymbolToCallableFunction.Add("System.Object::GetType", default(LLVMValueRef));
-                
-                clrLogger.Debug("Added");
+                structDef.StructTypeRef =
+                    LLVM.StructType(structDef.LL_FieldTypeRefs.Select(I => I.FieldTypeRef).ToArray(), true);
+
+                _context.FullSymbolToTypeRef.Add("System.Object", structDef);
+
+                // TODO: Add actual Type retrieval for objects
+                _context.SymbolToCallableFunction.Add("System.Object::GetType", default(LLVMValueRef));
+
+                _context.CLRLogger.Debug("Added");
             }
             else
             {
@@ -126,255 +85,94 @@ namespace PearlCLR.JIT
 
         public void ProcessMainModule()
         {
-            LLVM.InstallFatalErrorHandler(reason => clrLogger.Debug(reason));
+            LLVM.InstallFatalErrorHandler(reason => _context.CLRLogger.Debug(reason));
             LoadDependency();
-            clrLogger.Info("Running Process Main Module");
-            clrLogger.Debug("Adding Critical Objects");
+            _context.CLRLogger.Info("Running Process Main Module");
+            _context.CLRLogger.Debug("Adding Critical Objects");
             AddBCLObjects();
-            clrLogger.Debug("Added Critical Objects");
-            clrLogger.Debug("Processing all exported types");
+            _context.CLRLogger.Debug("Added Critical Objects");
+            _context.CLRLogger.Debug("Processing all exported types");
             ProcessAllExportedTypes();
-            clrLogger.Debug("Processed all exported types");
-            clrLogger.Debug("Processing all functions");
+            _context.CLRLogger.Debug("Processed all exported types");
+            _context.CLRLogger.Debug("Processing all functions");
             ProcessFunction(assembly.MainModule.EntryPoint);
-            clrLogger.Debug("Processed all functions");
-            clrLogger.Debug("Linking JIT");
+            _context.CLRLogger.Debug("Processed all functions");
+            _context.CLRLogger.Debug("Linking JIT");
             LinkJIT();
-            clrLogger.Debug("Linked JIT");
-            clrLogger.Debug("Verifying LLVM emitted codes");
+            _context.CLRLogger.Debug("Linked JIT");
+            _context.CLRLogger.Debug("Verifying LLVM emitted codes");
             Verify();
-            clrLogger.Debug("Verified LLVM emitted codes");
-            clrLogger.Debug("Optimizing LLVM emitted codes");
+            _context.CLRLogger.Debug("Verified LLVM emitted codes");
+            _context.CLRLogger.Debug("Optimizing LLVM emitted codes");
             Optimize();
-            clrLogger.Debug("Optimized LLVM emitted codes");
-            clrLogger.Debug("Compiling LLVM emitted codes");
+            _context.CLRLogger.Debug("Optimized LLVM emitted codes");
+            _context.CLRLogger.Debug("Compiling LLVM emitted codes");
             Compile();
-            clrLogger.Debug("Compiled LLVM emitted codes");
-            clrLogger.Debug("Printing LLVM IR from Emitted LLVM Emitted Codes");
+            _context.CLRLogger.Debug("Compiled LLVM emitted codes");
+            _context.CLRLogger.Debug("Printing LLVM IR from Emitted LLVM Emitted Codes");
             PrintToLLVMIR("MainModule.bc");
-            clrLogger.Debug("Printed LLVM IR from Emitted LLVM Emitted Codes");
-            clrLogger.Debug("Running Entry Function of Compiled LLVM Emitted Codes");
+            _context.CLRLogger.Debug("Printed LLVM IR from Emitted LLVM Emitted Codes");
+            _context.CLRLogger.Debug("Running Entry Function of Compiled LLVM Emitted Codes");
             RunEntryFunction();
-            clrLogger.Debug("Entry Function of Compiled LLVM Emitted Codes concluded.");
+            _context.CLRLogger.Debug("Entry Function of Compiled LLVM Emitted Codes concluded.");
         }
 
         private void Verify()
         {
-            LLVM.DumpModule(llvmModuleRef);
+            LLVM.DumpModule(_context.ModuleRef);
             var passManager = LLVM.CreatePassManager();
             LLVM.AddVerifierPass(passManager);
-            LLVM.RunPassManager(passManager, llvmModuleRef);
+            LLVM.RunPassManager(passManager, _context.ModuleRef);
         }
 
 
         private void LoadDependency()
         {
             // We need printf!
-            if (Environment.OSVersion.Platform == PlatformID.Unix && LLVM.LoadLibraryPermanently("/usr/lib/libc.so.6") == new LLVMBool(1))
-            {
+            if (Environment.OSVersion.Platform == PlatformID.Unix &&
+                LLVM.LoadLibraryPermanently("/usr/lib/libc.so.6") == new LLVMBool(1))
                 throw new Exception("Failed to load Libc!");
-            }
-            else if (Environment.OSVersion.Platform == PlatformID.Win32NT &&
-                     LLVM.LoadLibraryPermanently("msvcrt.dll") == new LLVMBool(1))
-            {
+            if (Environment.OSVersion.Platform == PlatformID.Win32NT &&
+                LLVM.LoadLibraryPermanently("msvcrt.dll") == new LLVMBool(1))
                 throw new Exception("Failed to load winvcrt!");
-            }
 
-            clrLogger.Info("Successfully loaded LibC Library.");
+            _context.CLRLogger.Info("Successfully loaded LibC Library.");
             var ptr = LLVM.SearchForAddressOfSymbol("printf");
             if (ptr == IntPtr.Zero)
                 throw new Exception("Can't find Printf!");
             var printfType = LLVM.FunctionType(LLVM.Int32Type(), new[] {LLVM.PointerType(LLVM.Int8Type(), 0)}, true);
-            SymbolToCallableFunction.Add("System.Console::WriteLine",
-                LLVM.AddFunction(llvmModuleRef, "printf", printfType));
+            _context.SymbolToCallableFunction.Add("System.Console::WriteLine",
+                LLVM.AddFunction(_context.ModuleRef, "printf", printfType));
         }
 
         private LLVMValueRef DebugPrint(LLVMBuilderRef builder, string format, params LLVMValueRef[] values)
         {
-            return LLVM.BuildCall(builder, SymbolToCallableFunction["System.Console::WriteLine"], values.Prepend(LLVM.BuildGlobalStringPtr(builder, format, "")).ToArray(), "");
+            return LLVM.BuildCall(builder, _context.SymbolToCallableFunction["System.Console::WriteLine"],
+                values.Prepend(LLVM.BuildGlobalStringPtr(builder, format, "")).ToArray(), "");
         }
 
         private void PrintToLLVMIR(string filename)
         {
-            LLVM.WriteBitcodeToFile(llvmModuleRef, filename);
-            clrLogger.Info("LLVM Bitcode written to {0}", filename);
+            LLVM.WriteBitcodeToFile(_context.ModuleRef, filename);
+            _context.CLRLogger.Info("LLVM Bitcode written to {0}", filename);
         }
 
         private void ProcessAllExportedTypes()
         {
             foreach (var exportedType in assembly.MainModule.GetTypes())
             {
-                if (FullSymbolToTypeRef.ContainsKey(exportedType.FullName))
+                if (_context.FullSymbolToTypeRef.ContainsKey(exportedType.FullName))
                     continue;
                 // Handle for Struct
-                var structDef = ProcessForStruct(exportedType);
+                var structDef = _context.TypeResolver.ProcessForStruct(exportedType);
 
-                FullSymbolToTypeRef.Add(exportedType.FullName, structDef);
+                _context.FullSymbolToTypeRef.Add(exportedType.FullName, structDef);
             }
         }
 
-        private FieldDefinition[] ResolveAllFields(TypeDefinition type)
-        {
-            var Fields = new Stack<FieldDefinition>();
-            foreach (var field in type.Fields)
-            {
-                Fields.Push(field);
-            }
 
-            if (type.BaseType != null && type.FullName != type.BaseType.FullName)
-            {
-                if (type.BaseType.FullName == "System.Object")
-                {
-                    
-                }
-                var declaredTypeFields = ResolveAllFields(type.BaseType.Resolve());
-                foreach (var field in declaredTypeFields)
-                {
-                    Fields.Push(field);
-                }
-            }
-
-            return Fields.ToArray();
-        }
-
-        private StructDefinition ProcessForStruct(TypeDefinition type)
-        {
-            clrLogger.Debug($"\tProcessing {type.FullName} type for LLVM");
-            var processed = ResolveAllFields(type.Resolve());
-            foreach (var field in processed)
-            {
-                if (field.FieldType.IsNested && !FullSymbolToTypeRef.ContainsKey(field.FieldType.FullName))
-                {
-                    FullSymbolToTypeRef.Add(field.FieldType.FullName, ProcessForStruct(field.FieldType.Resolve()));
-                }
-            }
-
-            var structDef = new StructDefinition
-            {
-                CS_StructName = type.FullName,
-                LL_StructName = type.FullName,
-                CS_FieldDefs = processed,
-                LL_FieldTypeRefs = processed.Select(I => ResolveType(I.FieldType)).ToArray()
-            };
-            structDef.StructTypeRef = LLVM.StructTypeInContext(llvmContextRef, structDef.LL_FieldTypeRefs.Select(
-                f =>
-                {
-                    clrLogger.Debug($"\t\t{f.StackType.FullName} - {f.FieldTypeRef}");
-                    return f.FieldTypeRef;
-                }).ToArray(), true);
-            return structDef;
-        }
-
-        private LLVMFieldDefAndRef ResolveType(TypeReference fieldType) =>
-            new LLVMFieldDefAndRef(fieldType, _llvmTypeResolver.Resolve(fieldType));
-
-        private LLVMTypeRef ResolveLLVMType(TypeReference def)
-        {
-            if (def.IsPointer)
-            {
-                var definedType = ResolveLLVMType(def.Resolve());
-                // If confused what this is, this exists to support something like this:
-                // int**************************************** into LLVM representation
-                for (var I = def.Name.Length - 1; I > -1; --I)
-                    if (def.Name[I] == '*')
-                        definedType = LLVM.PointerType(definedType, 0);
-                    else
-                        break;
-                return definedType;
-            }
-
-            if (def.FullName == "System.Void")
-            {
-                return LLVM.VoidType();
-            }
-            if (def.FullName == "System.Decimal")
-            {
-                return LLVM.FP128Type();
-            }
-
-            if (def.IsPrimitive)
-                switch (def.FullName)
-                {
-                    case "System.Boolean":
-                    {
-                        return LLVM.Int8Type();
-                    }
-                    case "System.SByte":
-                    {
-                        return LLVM.Int8Type();
-                    }
-                    case "System.Int8":
-                    {
-                        return LLVM.Int8Type();
-                    }
-                    case "System.Int16":
-                    {
-                        return LLVM.Int16Type();
-                    }
-                    case "System.Int32":
-                    {
-                        return LLVM.Int32Type();
-                    }
-                    case "System.Int64":
-                    {
-                        return LLVM.Int64Type();
-                    }
-                    case "System.Byte":
-                    {
-                        return LLVM.Int8Type();
-                    }
-                    case "System.UInt8":
-                    {
-                        return LLVM.Int8Type();
-                    }
-                    case "System.UInt16":
-                    {
-                        return LLVM.Int16Type();
-                    }
-                    case "System.UInt32":
-                    {
-                        return LLVM.Int32Type();
-                    }
-                    case "System.UInt64":
-                    {
-                        return LLVM.Int64Type();
-                    }
-                    case "System.Float":
-                    {
-                        return LLVM.FloatType();
-                    }
-                    case "System.Double":
-                    {
-                        return LLVM.DoubleType();
-                    }
-                    default:
-                    {
-                        throw new Exception("Unhandled Type for Primitive!" + def.FullName);
-                    }
-                }
-
-            if (def.FullName == "System.String")
-            {
-                if (_options.CStringMode)
-                // This is a special case, all string in this CLR is null terminated.
-                    return LLVM.PointerType(LLVM.Int8Type(), 0);
-            }
-
-            if (def.FullName == "System.Type")
-            {
-                return LLVM.VoidType();
-            }
-            if (FullSymbolToTypeRef.TryGetValue(def.FullName, out var val))
-            {
-                if (def.Resolve().IsClass)
-                    return LLVM.PointerType(val.StructTypeRef, 0);
-                return val.StructTypeRef;
-            }
-
-            throw new NotSupportedException($"Unhandled Type. {def.FullName} {def.DeclaringType}");
-        }
-
-        private void ProcessCall(Instruction instruction, LLVMBuilderRef builder, int indent, Stack<BuilderStackItem> builderStack)
+        private void ProcessCall(Instruction instruction, LLVMBuilderRef builder, int indent,
+            Stack<BuilderStackItem> builderStack)
         {
             var prepend = string.Empty;
             if (indent > 0)
@@ -383,7 +181,7 @@ namespace PearlCLR.JIT
 
             void Debug(string msg)
             {
-                clrLogger.Debug($"{prepend}{msg}");
+                _context.CLRLogger.Debug($"{prepend}{msg}");
             }
 
             var methodToCall = (MethodReference) instruction.Operand;
@@ -398,9 +196,7 @@ namespace PearlCLR.JIT
                 var refs = new LLVMValueRef[methodToCall.Parameters.Count];
                 if (refs.Length > 0)
                     for (var i = methodToCall.Parameters.Count - 1; i > -1; --i)
-                    {
                         refs[i] = builderStack.Pop().ValRef.Value;
-                    }
 
                 var reference = builderStack.Pop();
                 var stackItem = new BuilderStackItem(methodToCall.ReturnType.Resolve(),
@@ -423,11 +219,9 @@ namespace PearlCLR.JIT
                             : methodToCall.Parameters.Count - 1;
                         i > (methodToCall.HasThis ? 0 : -1);
                         --i)
-                    {
                         refs[i] = builderStack.Pop().ValRef.Value;
-                    }
 
-                if (!SymbolToCallableFunction.ContainsKey(GetCSToLLVMSymbolName(methodToCall)))
+                if (!_context.SymbolToCallableFunction.ContainsKey(GetCSToLLVMSymbolName(methodToCall)))
                 {
                     Debug("Resolving Function");
                     ProcessFunction(methodToCall.Resolve(), false, indent + 1);
@@ -437,21 +231,17 @@ namespace PearlCLR.JIT
                 {
                     var reference = builderStack.Pop();
                     if (methodToCall.DeclaringType.FullName != reference.Type.FullName)
-                    {
                         refs[0] = LLVM.BuildPointerCast(builder, reference.ValRef.Value,
-                            SymbolToCallableFunction[symbol].GetFirstParam().TypeOf(), "");
-                    }
+                            _context.SymbolToCallableFunction[symbol].GetFirstParam().TypeOf(), "");
                     else
-                    {
                         refs[0] = reference.ValRef.Value;
-                    }
                 }
 
                 if (methodToCall.ReturnType.FullName != "System.Void")
                 {
                     var stackItem = new BuilderStackItem(methodToCall.ReturnType.Resolve(),
                         LLVM.BuildCall(builder,
-                            SymbolToCallableFunction[GetCSToLLVMSymbolName(methodToCall)],
+                            _context.SymbolToCallableFunction[GetCSToLLVMSymbolName(methodToCall)],
                             refs, ""));
                     builderStack.Push(stackItem);
                     Debug($"[{instruction.OpCode.Name} {methodToCall.FullName}] -> Push {stackItem.ValRef} to Stack");
@@ -459,46 +249,36 @@ namespace PearlCLR.JIT
                 }
 
                 var call = LLVM.BuildCall(builder,
-                    SymbolToCallableFunction[GetCSToLLVMSymbolName(methodToCall)],
+                    _context.SymbolToCallableFunction[GetCSToLLVMSymbolName(methodToCall)],
                     refs, "");
                 Debug($"[{instruction.OpCode.Name} {methodToCall.FullName}] -> Called {call}");
             }
         }
 
-        LLVMValueRef AutoCast(LLVMBuilderRef builder, LLVMValueRef val, LLVMTypeRef type)
+        private LLVMValueRef AutoCast(LLVMBuilderRef builder, LLVMValueRef val, LLVMTypeRef type)
         {
             // Int to Int
             if (val.TypeOf().TypeKind == LLVMTypeKind.LLVMIntegerTypeKind &&
                 type.TypeKind == LLVMTypeKind.LLVMIntegerTypeKind)
-            {
                 return LLVM.BuildZExt(builder, val, type, "");
-            }
-            
+
             // Int to Floating Point
             if (val.TypeOf().TypeKind == LLVMTypeKind.LLVMIntegerTypeKind &&
                 type.TypeKind == LLVMTypeKind.LLVMFloatTypeKind)
-            {
                 return LLVM.BuildSIToFP(builder, val, type, "");
-            }
-            
+
             // Floating Point to Int
             if (val.TypeOf().TypeKind == LLVMTypeKind.LLVMIntegerTypeKind &&
                 type.TypeKind == LLVMTypeKind.LLVMIntegerTypeKind)
-            {
                 return LLVM.BuildFPToSI(builder, val, type, "");
-            }
-            
+
             // Floating Point to Floating Point
             if (val.TypeOf().TypeKind == LLVMTypeKind.LLVMIntegerTypeKind &&
                 type.TypeKind == LLVMTypeKind.LLVMFloatTypeKind)
-            {
                 return LLVM.BuildFPCast(builder, val, type, "");
-            }
-            throw new Exception($"{val.TypeOf().TypeKind} to {type.TypeKind}");
-        }
 
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void EntryFunc_dt();
+            throw new Exception($"Unsupported cast for {val.TypeOf().TypeKind} to {type.TypeKind}");
+        }
 
         private void ProcessFunction(MethodDefinition method, bool isMain = true, int indent = 0)
         {
@@ -509,9 +289,9 @@ namespace PearlCLR.JIT
 
             void Debug(string msg)
             {
-                clrLogger.Debug(prepend + msg);
+                _context.CLRLogger.Debug(prepend + msg);
             }
-            
+
             Debug($"{method.FullName}");
             var builderStack = new Stack<BuilderStackItem>();
             var localVariables = new List<LLVMValueRef>();
@@ -521,38 +301,37 @@ namespace PearlCLR.JIT
             var processedBranch = new List<Instruction>();
             LLVMTypeRef functionType;
             if (method.HasThis)
-            {
                 functionType = LLVM.FunctionType(
-                    ResolveType(method.ReturnType).FieldTypeRef,
-                    method.Parameters.Select(p => ResolveType(p.ParameterType).FieldTypeRef)
-                        .Prepend(LLVM.PointerType(FullSymbolToTypeRef[method.DeclaringType.FullName].StructTypeRef, 0)).ToArray(),
+                    _context.TypeResolver.ResolveType(method.ReturnType).FieldTypeRef,
+                    method.Parameters.Select(p => _context.TypeResolver.ResolveType(p.ParameterType).FieldTypeRef)
+                        .Prepend(LLVM.PointerType(
+                            _context.FullSymbolToTypeRef[method.DeclaringType.FullName].StructTypeRef, 0)).ToArray(),
                     false
                 );
-            }
             else
-            {
                 functionType = LLVM.FunctionType(
-                    ResolveType(method.ReturnType).FieldTypeRef,
-                    method.Parameters.Select(p => ResolveType(p.ParameterType).FieldTypeRef).ToArray(),
+                    _context.TypeResolver.ResolveType(method.ReturnType).FieldTypeRef,
+                    method.Parameters.Select(p => _context.TypeResolver.ResolveType(p.ParameterType).FieldTypeRef)
+                        .ToArray(),
                     false
                 );
-            }
 
             var entryFunctionSymbol = GetCSToLLVMSymbolName(method);
             LLVMValueRef entryFunction;
 
             if (method.IsPInvokeImpl)
             {
-                entryFunction = LLVM.AddFunction(llvmModuleRef, method.PInvokeInfo.EntryPoint ?? entryFunctionSymbol,
+                entryFunction = LLVM.AddFunction(_context.ModuleRef,
+                    method.PInvokeInfo.EntryPoint ?? entryFunctionSymbol,
                     functionType);
                 if (method.PInvokeInfo.Module.Name != "__internal")
                     throw new NotSupportedException("Does not support actual P/Invoke just yet.");
 
-                SymbolToCallableFunction.Add(GetCSToLLVMSymbolName(method), entryFunction);
+                _context.SymbolToCallableFunction.Add(GetCSToLLVMSymbolName(method), entryFunction);
                 return;
             }
 
-            entryFunction = LLVM.AddFunction(llvmModuleRef, isMain ? "main" : entryFunctionSymbol, functionType);
+            entryFunction = LLVM.AddFunction(_context.ModuleRef, isMain ? "main" : entryFunctionSymbol, functionType);
 
             var entryBlock = LLVM.AppendBasicBlock(entryFunction, "entry");
             var builder = LLVM.CreateBuilder();
@@ -563,37 +342,41 @@ namespace PearlCLR.JIT
                 if (local.VariableType.IsPointer)
                 {
                     localVariableTypes.Add(local.VariableType);
-                    var alloca = LLVM.BuildAlloca(builder, _llvmTypeResolver.Resolve(local.VariableType), $"Alloca_{local.VariableType.Name}");
-                    Debug($"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
+                    var alloca = LLVM.BuildAlloca(builder, _context.TypeResolver.Resolve(local.VariableType),
+                        $"Alloca_{local.VariableType.Name}");
+                    Debug(
+                        $"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
                     localVariables.Add(alloca);
                 }
                 else if (local.VariableType.IsPrimitive)
                 {
-                    var type = _llvmTypeResolver.Resolve(local.VariableType);
+                    var type = _context.TypeResolver.Resolve(local.VariableType);
                     localVariableTypes.Add(local.VariableType);
                     var alloca = LLVM.BuildAlloca(builder, type, $"Alloca_{local.VariableType.Name}");
-                    Debug($"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
+                    Debug(
+                        $"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
                     localVariables.Add(alloca);
                 }
                 else
                 {
                     localVariableTypes.Add(local.VariableType);
-                    if (!FullSymbolToTypeRef.ContainsKey(local.VariableType.FullName))
-                        FullSymbolToTypeRef.Add(local.VariableType.FullName, ProcessForStruct(local.VariableType.Resolve()));
+                    if (!_context.FullSymbolToTypeRef.ContainsKey(local.VariableType.FullName))
+                        _context.FullSymbolToTypeRef.Add(local.VariableType.FullName,
+                            _context.TypeResolver.ProcessForStruct(local.VariableType.Resolve()));
                     var alloca = LLVM.BuildAlloca(builder,
-                        LLVM.PointerType(FullSymbolToTypeRef[local.VariableType.FullName].StructTypeRef, 0),
+                        LLVM.PointerType(_context.FullSymbolToTypeRef[local.VariableType.FullName].StructTypeRef, 0),
                         $"Alloca_{local.VariableType.MakePointerType().Name}");
-                    Debug($"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
+                    Debug(
+                        $"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
                     localVariables.Add(alloca);
                 }
             }
-            
+
             // Handle Branch Blocks
             foreach (var instruction in method.Body.Instructions)
-            {
                 if (instruction.OpCode == OpCodes.Br_S ||
                     instruction.OpCode == OpCodes.Br ||
-                    instruction.OpCode == OpCodes.Brtrue||
+                    instruction.OpCode == OpCodes.Brtrue ||
                     instruction.OpCode == OpCodes.Brfalse ||
                     instruction.OpCode == OpCodes.Brtrue_S ||
                     instruction.OpCode == OpCodes.Brfalse_S ||
@@ -618,25 +401,23 @@ namespace PearlCLR.JIT
                     instruction.OpCode == OpCodes.Bne_Un ||
                     instruction.OpCode == OpCodes.Bne_Un_S)
                 {
-                    var operand = (Instruction)instruction.Operand;
+                    var operand = (Instruction) instruction.Operand;
                     var branch = LLVM.AppendBasicBlock(entryFunction, "branch");
                     branchTo.TryAdd(operand, branch);
                     branchToProcess.Push(new KeyValuePair<Instruction, LLVMBasicBlockRef>(operand, branch));
                     Debug($"Branch to {operand}");
                 }
-            }
 
             LLVMValueRef ProcessStore(LLVMValueRef lval, LLVMValueRef rval)
             {
                 var lvalType = lval.TypeOf();
                 var rvalType = rval.TypeOf();
                 if (!lvalType.Equals(LLVM.GetElementType(rvalType)))
-                {
                     lval = AutoCast(builder, lval, rvalType.GetElementType());
-                }
+
                 return LLVM.BuildStore(builder, lval, rval);
             }
-            
+
             void ProcessStoreLoc(BuilderStackItem stackItem, int localVariableIndex)
             {
                 var localVariableType = localVariableTypes[localVariableIndex];
@@ -644,9 +425,11 @@ namespace PearlCLR.JIT
                 //TODO: Need a better way to compare...
                 if (localVariableType.IsPointer)
                 {
-                    var resolvePtrType = _llvmTypeResolver.Resolve(localVariableType);
-                    var store = ProcessStore(LLVM.BuildIntToPtr(builder, stackItem.ValRef.Value, resolvePtrType, "IntPtr"), localVariable);
-                    Debug($"[Stloc_{localVariableIndex}] -> Popped {stackItem.ValRef.Value.TypeOf()} and Stored {store}");
+                    var resolvePtrType = _context.TypeResolver.Resolve(localVariableType);
+                    var store = ProcessStore(
+                        LLVM.BuildIntToPtr(builder, stackItem.ValRef.Value, resolvePtrType, "IntPtr"), localVariable);
+                    Debug(
+                        $"[Stloc_{localVariableIndex}] -> Popped {stackItem.ValRef.Value.TypeOf()} and Stored {store}");
                 }
                 else
                 {
@@ -665,9 +448,7 @@ namespace PearlCLR.JIT
                     if (isFirst)
                         isFirst = false;
                     else
-                    {
                         instruction = instruction.Next;
-                    }
 
                     if (instruction.OpCode == OpCodes.Ldarg_0)
                     {
@@ -735,7 +516,7 @@ namespace PearlCLR.JIT
                             $"[Ldloca_S {def.Index}] -> Pushed Local Variable {stackItem.ValRef.Value} to Stack");
                         continue;
                     }
-                    
+
                     if (instruction.OpCode == OpCodes.Ldloc_S)
                     {
                         var def = (VariableDefinition) instruction.Operand;
@@ -847,7 +628,8 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldc_I4)
                     {
                         var operand = (int) instruction.Operand;
-                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(llvmContextRef), (ulong) operand, true);
+                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), (ulong) operand,
+                            true);
                         builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4 {operand}] -> Pushed {stackItem} to Stack");
@@ -857,7 +639,8 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldc_I4_S)
                     {
                         var operand = (sbyte) instruction.Operand;
-                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(llvmContextRef), (ulong) operand, true);
+                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), (ulong) operand,
+                            true);
                         builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_S {operand}] -> Pushed {stackItem} to Stack");
@@ -866,7 +649,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Ldc_I4_0)
                     {
-                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(llvmContextRef), 0, true);
+                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 0, true);
                         builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_0] -> Pushed {stackItem} to Stack");
@@ -875,7 +658,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Ldc_I4_1)
                     {
-                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(llvmContextRef), 1, true);
+                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 1, true);
                         builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_1] -> Pushed {stackItem} to Stack");
@@ -884,7 +667,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Ldc_I4_2)
                     {
-                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(llvmContextRef), 2, true);
+                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 2, true);
                         builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_2] -> Pushed {stackItem} to Stack");
@@ -893,7 +676,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Ldc_I4_3)
                     {
-                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(llvmContextRef), 3, true);
+                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 3, true);
                         builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_3] -> Pushed {stackItem} to Stack");
@@ -902,7 +685,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Ldc_I4_4)
                     {
-                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(llvmContextRef), 4, true);
+                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 4, true);
                         builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_4] -> Pushed {stackItem} to Stack");
@@ -911,7 +694,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Ldc_I4_5)
                     {
-                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(llvmContextRef), 5, true);
+                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 5, true);
                         builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_5] -> Pushed {stackItem} to Stack");
@@ -920,7 +703,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Ldc_I4_6)
                     {
-                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(llvmContextRef), 6, true);
+                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 6, true);
                         builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_6] -> Pushed {stackItem} to Stack");
@@ -929,7 +712,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Ldc_I4_7)
                     {
-                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(llvmContextRef), 7, true);
+                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 7, true);
                         builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_7] -> Pushed {stackItem} to Stack");
@@ -938,7 +721,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Ldc_I4_8)
                     {
-                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(llvmContextRef), 8, true);
+                        var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), 8, true);
                         builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                             stackItem));
                         Debug($"[Ldc_I4_8] -> Pushed {stackItem} to Stack");
@@ -958,7 +741,8 @@ namespace PearlCLR.JIT
                     {
                         unchecked
                         {
-                            var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(llvmContextRef), (ulong) -1, true);
+                            var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(_context.ContextRef), (ulong) -1,
+                                true);
                             builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
                                 stackItem));
                             Debug($"[Ldc_I4_M1] -> Pushed {stackItem} to Stack");
@@ -970,7 +754,7 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldc_I8)
                     {
                         var stackItem = new BuilderStackItem(MiniBCL.Int64Type,
-                            LLVM.ConstInt(LLVM.Int64TypeInContext(llvmContextRef), (ulong) instruction.Operand,
+                            LLVM.ConstInt(LLVM.Int64TypeInContext(_context.ContextRef), (ulong) instruction.Operand,
                                 new LLVMBool(1)));
                         builderStack.Push(stackItem);
                         Debug($"[Ldc_I8] -> Pushed {stackItem.ValRef.Value} to Stack");
@@ -980,7 +764,7 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldc_R4)
                     {
                         var stackItem = new BuilderStackItem(MiniBCL.FloatType,
-                            LLVM.ConstReal(LLVM.FloatTypeInContext(llvmContextRef), (double) instruction.Operand));
+                            LLVM.ConstReal(LLVM.FloatTypeInContext(_context.ContextRef), (double) instruction.Operand));
                         builderStack.Push(stackItem);
                         Debug($"[Ldc_R4] -> Pushed {stackItem.ValRef.Value} to Stack");
                         continue;
@@ -989,7 +773,8 @@ namespace PearlCLR.JIT
                     if (instruction.OpCode == OpCodes.Ldc_R8)
                     {
                         var stackItem = new BuilderStackItem(MiniBCL.DoubleType,
-                            LLVM.ConstReal(LLVM.DoubleTypeInContext(llvmContextRef), (double) instruction.Operand));
+                            LLVM.ConstReal(LLVM.DoubleTypeInContext(_context.ContextRef),
+                                (double) instruction.Operand));
                         builderStack.Push(stackItem);
                         Debug($"[Ldc_R8] -> Pushed {stackItem.ValRef.Value} to Stack");
                         continue;
@@ -1008,13 +793,12 @@ namespace PearlCLR.JIT
                     {
                         var operand = (MethodDefinition) instruction.Operand;
                         var symbol = GetCSToLLVMSymbolName(operand);
-                        if (!SymbolToCallableFunction.ContainsKey(symbol))
-                        {
+                        if (!_context.SymbolToCallableFunction.ContainsKey(symbol))
                             ProcessFunction(operand.Resolve(), false, indent + 1);
-                        }
 
                         var stackItem =
-                            new BuilderStackItem(operand.ReturnType.Resolve(), SymbolToCallableFunction[symbol]);
+                            new BuilderStackItem(operand.ReturnType.Resolve(),
+                                _context.SymbolToCallableFunction[symbol]);
                         builderStack.Push(stackItem);
                         Debug($"[Ldftn {stackItem.Type}] -> Pushed {stackItem.ValRef.Value} to Stack");
                         continue;
@@ -1026,11 +810,11 @@ namespace PearlCLR.JIT
                         LLVMValueRef valRef;
                         if (operand.DeclaringType.IsClass)
                             valRef = LLVM.BuildMalloc(builder,
-                                FullSymbolToTypeRef[operand.DeclaringType.FullName].StructTypeRef,
+                                _context.FullSymbolToTypeRef[operand.DeclaringType.FullName].StructTypeRef,
                                 $"Malloc_{operand.DeclaringType.Name}");
                         else
                             valRef = LLVM.BuildAlloca(builder,
-                                FullSymbolToTypeRef[operand.DeclaringType.FullName].StructTypeRef,
+                                _context.FullSymbolToTypeRef[operand.DeclaringType.FullName].StructTypeRef,
                                 $"Alloc_{operand.DeclaringType.Name}");
                         builderStack.Push(new BuilderStackItem(operand.DeclaringType, valRef));
                         ProcessCall(instruction, builder, indent, builderStack);
@@ -1051,7 +835,7 @@ namespace PearlCLR.JIT
                                 LLVM.PointerType(LLVM.Int8Type(), 0),
                                 "");
                         var store = ProcessStore(cast, ptr);
-                        clrLogger.Debug(
+                        _context.CLRLogger.Debug(
                             $"[Stind_I1] -> Popped {val.ValRef.Value} and {address.ValRef.Value} and Stored into address: {store}");
                         continue;
                     }
@@ -1077,8 +861,10 @@ namespace PearlCLR.JIT
                         }
                         // TODO: Support Decimal Conversion To Int64
                         else
+                        {
                             throw new Exception(
                                 "INTEGER 8 BYTES CONVERSION IS NOT SUPPORTED");
+                        }
 
                         continue;
                     }
@@ -1103,8 +889,10 @@ namespace PearlCLR.JIT
                                 $"[Conv_U1] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
                         else
+                        {
                             throw new Exception(
                                 "UNSIGNED INTEGER 1 BYTES CONVERSION IS NOT SUPPORTED");
+                        }
 
                         continue;
                     }
@@ -1129,8 +917,10 @@ namespace PearlCLR.JIT
                                 $"[Conv_U2] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
                         else
+                        {
                             throw new Exception(
                                 "UNSIGNED INTEGER 2 BYTES CONVERSION IS NOT SUPPORTED");
+                        }
 
                         continue;
                     }
@@ -1155,8 +945,10 @@ namespace PearlCLR.JIT
                                 $"[Conv_U4] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
                         else
+                        {
                             throw new Exception(
                                 "UNSIGNED INTEGER 4 BYTES CONVERSION IS NOT SUPPORTED");
+                        }
 
                         continue;
                     }
@@ -1181,8 +973,10 @@ namespace PearlCLR.JIT
                                 $"[Conv_U8] -> Popped {value.ValRef.Value} and Pushed As Unsigned Integer {stackItem.ValRef.Value} to Stack");
                         }
                         else
+                        {
                             throw new Exception(
                                 "UNSIGNED INTEGER 8 BYTES CONVERSION IS NOT SUPPORTED");
+                        }
 
                         continue;
                     }
@@ -1207,8 +1001,10 @@ namespace PearlCLR.JIT
                                 $"[Conv_I1] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
                         else
+                        {
                             throw new Exception(
                                 "INTEGER 1 BYTES CONVERSION IS NOT SUPPORTED");
+                        }
 
                         continue;
                     }
@@ -1233,8 +1029,10 @@ namespace PearlCLR.JIT
                                 $"[Conv_I2] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
                         else
+                        {
                             throw new Exception(
                                 "INTEGER 2 BYTES CONVERSION IS NOT SUPPORTED");
+                        }
 
                         continue;
                     }
@@ -1267,8 +1065,10 @@ namespace PearlCLR.JIT
                                 $"[Conv_I4] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
                         else
+                        {
                             throw new Exception(
                                 "INTEGER 4 BYTES CONVERSION IS NOT SUPPORTED");
+                        }
 
                         continue;
                     }
@@ -1293,8 +1093,10 @@ namespace PearlCLR.JIT
                                 $"[Conv_I8] -> Popped {value.ValRef.Value} and Pushed As Signed Integer {stackItem.ValRef.Value} to Stack");
                         }
                         else
+                        {
                             throw new Exception(
                                 "INTEGER 8 BYTES CONVERSION IS NOT SUPPORTED");
+                        }
 
                         continue;
                     }
@@ -1305,7 +1107,8 @@ namespace PearlCLR.JIT
                         if (IsTypeAnInteger(value.Type))
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.FloatType,
-                                LLVM.BuildSIToFP(builder, value.ValRef.Value, LLVM.FloatTypeInContext(llvmContextRef),
+                                LLVM.BuildSIToFP(builder, value.ValRef.Value,
+                                    LLVM.FloatTypeInContext(_context.ContextRef),
                                     ""));
                             builderStack.Push(stackItem);
                             Debug(
@@ -1314,7 +1117,8 @@ namespace PearlCLR.JIT
                         else if (IsTypeARealNumber(value.Type))
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.FloatType,
-                                LLVM.BuildFPCast(builder, value.ValRef.Value, LLVM.FloatTypeInContext(llvmContextRef),
+                                LLVM.BuildFPCast(builder, value.ValRef.Value,
+                                    LLVM.FloatTypeInContext(_context.ContextRef),
                                     ""));
                             builderStack.Push(stackItem);
                             Debug(
@@ -1335,7 +1139,8 @@ namespace PearlCLR.JIT
                         if (IsTypeAnInteger(value.Type))
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.DoubleType,
-                                LLVM.BuildSIToFP(builder, value.ValRef.Value, LLVM.DoubleTypeInContext(llvmContextRef),
+                                LLVM.BuildSIToFP(builder, value.ValRef.Value,
+                                    LLVM.DoubleTypeInContext(_context.ContextRef),
                                     ""));
                             builderStack.Push(stackItem);
                             Debug(
@@ -1344,7 +1149,8 @@ namespace PearlCLR.JIT
                         else if (IsTypeARealNumber(value.Type))
                         {
                             var stackItem = new BuilderStackItem(MiniBCL.DoubleType,
-                                LLVM.BuildFPCast(builder, value.ValRef.Value, LLVM.DoubleTypeInContext(llvmContextRef),
+                                LLVM.BuildFPCast(builder, value.ValRef.Value,
+                                    LLVM.DoubleTypeInContext(_context.ContextRef),
                                     ""));
                             builderStack.Push(stackItem);
                             Debug(
@@ -1371,16 +1177,14 @@ namespace PearlCLR.JIT
                             throw new Exception(
                                 "The Value/Reference returned as null thus cannot be stored in Struct!");
 
-                        var index = (uint)  Array.IndexOf(FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs, 
-                            FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs
-                            .First(I => I.Name == fieldDef.Name));
+                        var index = (uint) Array.IndexOf(
+                            _context.FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs,
+                            _context.FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs
+                                .First(I => I.Name == fieldDef.Name));
 
                         var refToStruct = structRef.ValRef.Value;
                         LLVMValueRef offset;
-                        if (fieldDef.DeclaringType.IsClass)
-                        {
-                            offset = LLVM.BuildLoad(builder, refToStruct, "");
-                        }
+                        if (fieldDef.DeclaringType.IsClass) offset = LLVM.BuildLoad(builder, refToStruct, "");
 
                         offset = LLVM.BuildStructGEP(builder, refToStruct, index, structRef.Type.Name);
                         ProcessStore(value.ValRef.Value, offset);
@@ -1435,9 +1239,10 @@ namespace PearlCLR.JIT
                         //var load = LLVM.BuildLoad(builder, structRef.ValRef.Value, $"Loaded_{structRef.Type.Name}");
                         var load = structRef.ValRef.Value;
                         var offset = LLVM.BuildStructGEP(builder, load,
-                            (uint) Array.IndexOf(FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs,
-                                FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs
-                                .First(I => I.Name == fieldDef.Name)), $"Offset_{fieldDef.Name}");
+                            (uint) Array.IndexOf(
+                                _context.FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs,
+                                _context.FullSymbolToTypeRef[fieldDef.DeclaringType.FullName].CS_FieldDefs
+                                    .First(I => I.Name == fieldDef.Name)), $"Offset_{fieldDef.Name}");
                         var item = new BuilderStackItem(fieldDef.FieldType, LLVM.BuildLoad(builder, offset, ""));
                         builderStack.Push(item);
                         Debug(
@@ -1473,16 +1278,12 @@ namespace PearlCLR.JIT
                             LLVMValueRef actualLVal;
                             LLVMValueRef actualRVal;
                             if (lval.ValRef.Value.TypeOf().TypeKind == LLVMTypeKind.LLVMPointerTypeKind)
-                            {
                                 actualLVal = LLVM.BuildPtrToInt(builder, lval.ValRef.Value, LLVM.Int32Type(), "lval");
-                            }
                             else
                                 actualLVal = LLVM.BuildZExt(builder, lval.ValRef.Value, LLVM.Int32Type(), "lval");
 
                             if (rval.ValRef.Value.TypeOf().TypeKind == LLVMTypeKind.LLVMPointerTypeKind)
-                            {
                                 actualRVal = LLVM.BuildPtrToInt(builder, rval.ValRef.Value, LLVM.Int32Type(), "rval");
-                            }
                             else
                                 actualRVal = LLVM.BuildZExt(builder, rval.ValRef.Value, LLVM.Int32Type(), "rval");
 
@@ -1507,7 +1308,7 @@ namespace PearlCLR.JIT
 
                         continue;
                     }
-                    
+
                     if (instruction.OpCode == OpCodes.Sub)
                     {
                         // TODO: Support conversion between Floating Point and Integers
@@ -1519,16 +1320,12 @@ namespace PearlCLR.JIT
                             LLVMValueRef actualLVal;
                             LLVMValueRef actualRVal;
                             if (lval.ValRef.Value.TypeOf().TypeKind == LLVMTypeKind.LLVMPointerTypeKind)
-                            {
                                 actualLVal = LLVM.BuildPtrToInt(builder, lval.ValRef.Value, LLVM.Int32Type(), "lval");
-                            }
                             else
                                 actualLVal = LLVM.BuildZExt(builder, lval.ValRef.Value, LLVM.Int32Type(), "lval");
 
                             if (rval.ValRef.Value.TypeOf().TypeKind == LLVMTypeKind.LLVMPointerTypeKind)
-                            {
                                 actualRVal = LLVM.BuildPtrToInt(builder, rval.ValRef.Value, LLVM.Int32Type(), "rval");
-                            }
                             else
                                 actualRVal = LLVM.BuildZExt(builder, rval.ValRef.Value, LLVM.Int32Type(), "rval");
 
@@ -1553,7 +1350,7 @@ namespace PearlCLR.JIT
 
                         continue;
                     }
-                    
+
                     if (instruction.OpCode == OpCodes.Mul)
                     {
                         // TODO: Support conversion between Floating Point and Integers
@@ -1565,16 +1362,12 @@ namespace PearlCLR.JIT
                             LLVMValueRef actualLVal;
                             LLVMValueRef actualRVal;
                             if (lval.ValRef.Value.TypeOf().TypeKind == LLVMTypeKind.LLVMPointerTypeKind)
-                            {
                                 actualLVal = LLVM.BuildPtrToInt(builder, lval.ValRef.Value, LLVM.Int32Type(), "lval");
-                            }
                             else
                                 actualLVal = LLVM.BuildZExt(builder, lval.ValRef.Value, LLVM.Int32Type(), "lval");
 
                             if (rval.ValRef.Value.TypeOf().TypeKind == LLVMTypeKind.LLVMPointerTypeKind)
-                            {
                                 actualRVal = LLVM.BuildPtrToInt(builder, rval.ValRef.Value, LLVM.Int32Type(), "rval");
-                            }
                             else
                                 actualRVal = LLVM.BuildZExt(builder, rval.ValRef.Value, LLVM.Int32Type(), "rval");
 
@@ -1599,7 +1392,7 @@ namespace PearlCLR.JIT
 
                         continue;
                     }
-                    
+
                     if (instruction.OpCode == OpCodes.Div)
                     {
                         // TODO: Support conversion between Floating Point and Integers
@@ -1611,16 +1404,12 @@ namespace PearlCLR.JIT
                             LLVMValueRef actualLVal;
                             LLVMValueRef actualRVal;
                             if (lval.ValRef.Value.TypeOf().TypeKind == LLVMTypeKind.LLVMPointerTypeKind)
-                            {
                                 actualLVal = LLVM.BuildPtrToInt(builder, lval.ValRef.Value, LLVM.Int32Type(), "lval");
-                            }
                             else
                                 actualLVal = LLVM.BuildZExt(builder, lval.ValRef.Value, LLVM.Int32Type(), "lval");
 
                             if (rval.ValRef.Value.TypeOf().TypeKind == LLVMTypeKind.LLVMPointerTypeKind)
-                            {
                                 actualRVal = LLVM.BuildPtrToInt(builder, rval.ValRef.Value, LLVM.Int32Type(), "rval");
-                            }
                             else
                                 actualRVal = LLVM.BuildZExt(builder, rval.ValRef.Value, LLVM.Int32Type(), "rval");
 
@@ -1645,7 +1434,7 @@ namespace PearlCLR.JIT
 
                         continue;
                     }
-                    
+
                     if (instruction.OpCode == OpCodes.Rem)
                     {
                         // TODO: Support conversion between Floating Point and Integers
@@ -1657,16 +1446,12 @@ namespace PearlCLR.JIT
                             LLVMValueRef actualLVal;
                             LLVMValueRef actualRVal;
                             if (lval.ValRef.Value.TypeOf().TypeKind == LLVMTypeKind.LLVMPointerTypeKind)
-                            {
                                 actualLVal = LLVM.BuildPtrToInt(builder, lval.ValRef.Value, LLVM.Int32Type(), "lval");
-                            }
                             else
                                 actualLVal = LLVM.BuildZExt(builder, lval.ValRef.Value, LLVM.Int32Type(), "lval");
 
                             if (rval.ValRef.Value.TypeOf().TypeKind == LLVMTypeKind.LLVMPointerTypeKind)
-                            {
                                 actualRVal = LLVM.BuildPtrToInt(builder, rval.ValRef.Value, LLVM.Int32Type(), "rval");
-                            }
                             else
                                 actualRVal = LLVM.BuildZExt(builder, rval.ValRef.Value, LLVM.Int32Type(), "rval");
 
@@ -1694,7 +1479,7 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Box)
                     {
-                        var operand = (TypeReference)instruction.Operand;
+                        var operand = (TypeReference) instruction.Operand;
                         Debug("[Box] -> Allocated as Reference {0}");
                         continue;
                     }
@@ -1705,10 +1490,7 @@ namespace PearlCLR.JIT
                         var lval = builderStack.Pop().ValRef.Value;
                         var rvalType = rval.TypeOf();
                         var lvalType = lval.TypeOf();
-                        if (!rvalType.Equals(lvalType))
-                        {
-                            rval = AutoCast(builder, rval, lvalType);
-                        }
+                        if (!rvalType.Equals(lvalType)) rval = AutoCast(builder, rval, lvalType);
 
                         LLVMValueRef cmp;
                         if (lvalType.TypeKind == LLVMTypeKind.LLVMIntegerTypeKind)
@@ -1718,24 +1500,20 @@ namespace PearlCLR.JIT
                         else if (lvalType.TypeKind == LLVMTypeKind.LLVMDoubleTypeKind)
                             cmp = LLVM.BuildFCmp(builder, LLVMRealPredicate.LLVMRealOLT, lval, rval, "clt");
                         else
-                        {
                             throw new NotImplementedException(
                                 $"No comparision supported for those types: {lval} < {rval}");
-                        }
+
                         builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type, cmp));
                         continue;
                     }
-                    
+
                     if (instruction.OpCode == OpCodes.Cgt)
                     {
                         var rval = builderStack.Pop().ValRef.Value;
                         var lval = builderStack.Pop().ValRef.Value;
                         var rvalType = rval.TypeOf();
                         var lvalType = lval.TypeOf();
-                        if (!rvalType.Equals(lvalType))
-                        {
-                            rval = AutoCast(builder, rval, lvalType);
-                        }
+                        if (!rvalType.Equals(lvalType)) rval = AutoCast(builder, rval, lvalType);
 
                         LLVMValueRef cmp;
                         if (lvalType.TypeKind == LLVMTypeKind.LLVMIntegerTypeKind)
@@ -1745,10 +1523,8 @@ namespace PearlCLR.JIT
                         else if (lvalType.TypeKind == LLVMTypeKind.LLVMDoubleTypeKind)
                             cmp = LLVM.BuildFCmp(builder, LLVMRealPredicate.LLVMRealUGT, lval, rval, "cgt");
                         else
-                        {
                             throw new NotImplementedException(
                                 $"No comparision supported for those types: {lval} < {rval}");
-                        }
 
                         builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type, cmp));
                         continue;
@@ -1760,10 +1536,7 @@ namespace PearlCLR.JIT
                         var lval = builderStack.Pop().ValRef.Value;
                         var rvalType = rval.TypeOf();
                         var lvalType = lval.TypeOf();
-                        if (!rvalType.Equals(lvalType))
-                        {
-                            rval = AutoCast(builder, rval, lvalType);
-                        }
+                        if (!rvalType.Equals(lvalType)) rval = AutoCast(builder, rval, lvalType);
 
                         LLVMValueRef cmp;
                         if (lvalType.TypeKind == LLVMTypeKind.LLVMIntegerTypeKind)
@@ -1773,10 +1546,9 @@ namespace PearlCLR.JIT
                         else if (lvalType.TypeKind == LLVMTypeKind.LLVMDoubleTypeKind)
                             cmp = LLVM.BuildFCmp(builder, LLVMRealPredicate.LLVMRealOEQ, lval, rval, "ceq");
                         else
-                        {
                             throw new NotImplementedException(
                                 $"No comparision supported for those types: {lval} == {rval}");
-                        }
+
                         builderStack.Push(new BuilderStackItem(MiniBCL.Int32Type, cmp));
                         continue;
                     }
@@ -1804,27 +1576,22 @@ namespace PearlCLR.JIT
 
                     if (instruction.OpCode == OpCodes.Beq ||
                         instruction.OpCode == OpCodes.Beq_S ||
-                        
                         instruction.OpCode == OpCodes.Bge ||
                         instruction.OpCode == OpCodes.Bge_S ||
                         instruction.OpCode == OpCodes.Bge_Un ||
                         instruction.OpCode == OpCodes.Bge_Un_S ||
-                        
                         instruction.OpCode == OpCodes.Bgt ||
                         instruction.OpCode == OpCodes.Bgt_S ||
                         instruction.OpCode == OpCodes.Bgt_Un ||
                         instruction.OpCode == OpCodes.Bgt_Un_S ||
-                        
                         instruction.OpCode == OpCodes.Ble ||
                         instruction.OpCode == OpCodes.Ble_S ||
                         instruction.OpCode == OpCodes.Ble_Un ||
                         instruction.OpCode == OpCodes.Ble_Un_S ||
-                        
                         instruction.OpCode == OpCodes.Blt ||
                         instruction.OpCode == OpCodes.Blt_S ||
                         instruction.OpCode == OpCodes.Blt_Un ||
                         instruction.OpCode == OpCodes.Blt_Un_S ||
-                        
                         instruction.OpCode == OpCodes.Bne_Un ||
                         instruction.OpCode == OpCodes.Bne_Un_S)
                     {
@@ -1861,11 +1628,8 @@ namespace PearlCLR.JIT
                                  instruction.OpCode == OpCodes.Blt_Un_S)
                             intCmp = LLVMIntPredicate.LLVMIntULT;
                         else
-                        {
-                            // You have to somehow corrupt the program to get here.
                             throw new BadImageFormatException();
-                        }
-                        
+
                         var rval = builderStack.Pop();
                         var lval = builderStack.Pop();
                         var operand = (Instruction) instruction.Operand;
@@ -1878,10 +1642,10 @@ namespace PearlCLR.JIT
                         LLVM.BuildCondBr(builder,
                             cmp,
                             entryBlock, branchToBlock);
-                        
+
                         if (branchTo.ContainsKey(instruction.Next))
                             break;
-                        
+
                         LLVM.PositionBuilderAtEnd(builder, entryBlock);
                         AddBlockToProcess();
 
@@ -1889,8 +1653,8 @@ namespace PearlCLR.JIT
                             $"[{instruction.OpCode} {operand}] -> Popped {lval} and {rval} and pushed {cmp} and branched to {branchTo}");
                         continue;
                     }
-                    
-                    
+
+
                     if (instruction.OpCode == OpCodes.Brfalse ||
                         instruction.OpCode == OpCodes.Brfalse_S ||
                         instruction.OpCode == OpCodes.Brtrue ||
@@ -1914,12 +1678,12 @@ namespace PearlCLR.JIT
                             cmp,
                             entryBlock, branchToBlock);
                         if (branchTo.ContainsKey(instruction.Next))
-                            break;
-                        else
                         {
-                            LLVM.PositionBuilderAtEnd(builder, entryBlock);
-                            AddBlockToProcess();
+                            break;
                         }
+
+                        LLVM.PositionBuilderAtEnd(builder, entryBlock);
+                        AddBlockToProcess();
 
                         Debug(
                             $"[{instruction.OpCode} {operand}] -> Created Branch");
@@ -1964,14 +1728,12 @@ namespace PearlCLR.JIT
 
             entryFunction.Dump();
             if (LLVM.VerifyFunction(entryFunction, LLVMVerifierFailureAction.LLVMPrintMessageAction) == new LLVMBool(1))
-            {
                 throw new Exception("Function is not well formed!");
-            }
 
-            SymbolToCallableFunction.Add(entryFunctionSymbol, entryFunction);
+            _context.SymbolToCallableFunction.Add(entryFunctionSymbol, entryFunction);
         }
 
-        static bool IsTypeAnInteger(TypeReference reference)
+        private static bool IsTypeAnInteger(TypeReference reference)
         {
             if (reference.FullName == "System.SByte") return true;
             if (reference.FullName == "System.Byte") return true;
@@ -1985,24 +1747,26 @@ namespace PearlCLR.JIT
             return false;
         }
 
-        static bool IsTypeARealNumber(TypeReference reference)
+        private static bool IsTypeARealNumber(TypeReference reference)
         {
             if (reference.FullName == "System.Float") return true;
             if (reference.FullName == "System.Double") return true;
+            if (reference.FullName == "System.Decimal") return true;
             return false;
         }
 
         private void DebugLLVMEmit(LLVMBuilderRef builder, string format, LLVMValueRef val)
         {
             var formatStr = LLVM.BuildGlobalStringPtr(builder, format, "");
-            LLVM.BuildCall(builder, SymbolToCallableFunction["System.Console::WriteLine"],
-                new LLVMValueRef[] {formatStr, val}, "");
+            LLVM.BuildCall(builder, _context.SymbolToCallableFunction["System.Console::WriteLine"],
+                new[] {formatStr, val}, "");
         }
 
         private void LinkJIT()
         {
-            clrLogger.Debug(
-                LLVM.VerifyModule(llvmModuleRef, LLVMVerifierFailureAction.LLVMPrintMessageAction, out var error) !=
+            _context.CLRLogger.Debug(
+                LLVM.VerifyModule(_context.ModuleRef, LLVMVerifierFailureAction.LLVMPrintMessageAction,
+                    out var error) !=
                 new LLVMBool(0)
                     ? $"Error: {error}"
                     : "Successfully verified the module!");
@@ -2028,29 +1792,38 @@ namespace PearlCLR.JIT
             LLVM.AddLoopUnrollPass(pass);
 
             for (var passes = 0; passes < 10; ++passes)
-                LLVM.RunPassManager(pass, llvmModuleRef);
+                LLVM.RunPassManager(pass, _context.ModuleRef);
         }
 
         private void Compile()
         {
             var options = new LLVMMCJITCompilerOptions {OptLevel = 3, CodeModel = LLVMCodeModel.LLVMCodeModelLarge};
             LLVM.InitializeMCJITCompilerOptions(options);
-            if (LLVM.CreateMCJITCompilerForModule(out llvmEngineRef, llvmModuleRef, options, out var error) !=
+            if (LLVM.CreateMCJITCompilerForModule(out var compiler, _context.ModuleRef, options, out var error) !=
                 new LLVMBool(0))
             {
-                clrLogger.Debug($"Error: {error}");
+                _context.CLRLogger.Debug($"Error: {error}");
+                throw new Exception(error);
             }
+
+            _context.EngineRef = compiler;
         }
 
         private void RunEntryFunction()
         {
             var entrySymbol = GetCSToLLVMSymbolName(assembly.MainModule.EntryPoint);
-            var funcPtr = LLVM.GetPointerToGlobal(llvmEngineRef, SymbolToCallableFunction[entrySymbol]);
+            var funcPtr =
+                LLVM.GetPointerToGlobal(_context.EngineRef, _context.SymbolToCallableFunction[entrySymbol]);
             var mainFunc = Marshal.GetDelegateForFunctionPointer<EntryFunc_dt>(funcPtr);
             mainFunc();
         }
 
-        private static string GetCSToLLVMSymbolName(MethodReference method) =>
-            $"{method.DeclaringType.FullName}::{method.Name}";
+        private static string GetCSToLLVMSymbolName(MethodReference method)
+        {
+            return $"{method.DeclaringType.FullName}::{method.Name}";
+        }
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void EntryFunc_dt();
     }
 }
