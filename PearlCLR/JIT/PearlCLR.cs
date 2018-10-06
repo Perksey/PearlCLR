@@ -24,6 +24,7 @@ namespace PearlCLR.JIT
         private Logger clrLogger { get; set; }
         private readonly LLVMModuleRef llvmModuleRef;
         private readonly LLVMContextRef llvmContextRef;
+        private readonly LLVMTypeResolver _llvmTypeResolver;
         private LLVMExecutionEngineRef llvmEngineRef;
         private Dictionary<string, StructDefinition> FullSymbolToTypeRef { get; }
         private Dictionary<string, LLVMValueRef> SymbolToCallableFunction { get; }
@@ -52,7 +53,7 @@ namespace PearlCLR.JIT
             var targetData = LLVM.CreateTargetDataLayout(targetMachine);
             var size = LLVM.ABISizeOfType(targetData, LLVM.PointerType(LLVM.VoidType(), 0));
             clrLogger = LogManager.GetCurrentClassLogger();
-            
+            _llvmTypeResolver = new LLVMTypeResolver(_options.CStringMode, FullSymbolToTypeRef);            
             clrLogger.Debug($"Pointer Size: {size}");
         }
 
@@ -265,7 +266,7 @@ namespace PearlCLR.JIT
         }
 
         private LLVMFieldDefAndRef ResolveType(TypeReference fieldType) =>
-            new LLVMFieldDefAndRef(fieldType, ResolveLLVMType(fieldType));
+            new LLVMFieldDefAndRef(fieldType, _llvmTypeResolver.Resolve(fieldType));
 
         private LLVMTypeRef ResolveLLVMType(TypeReference def)
         {
@@ -562,13 +563,13 @@ namespace PearlCLR.JIT
                 if (local.VariableType.IsPointer)
                 {
                     localVariableTypes.Add(local.VariableType);
-                    var alloca = LLVM.BuildAlloca(builder, ResolveLLVMType(local.VariableType), $"Alloca_{local.VariableType.Name}");
+                    var alloca = LLVM.BuildAlloca(builder, _llvmTypeResolver.Resolve(local.VariableType), $"Alloca_{local.VariableType.Name}");
                     Debug($"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
                     localVariables.Add(alloca);
                 }
                 else if (local.VariableType.IsPrimitive)
                 {
-                    var type = ResolveLLVMType(local.VariableType);
+                    var type = _llvmTypeResolver.Resolve(local.VariableType);
                     localVariableTypes.Add(local.VariableType);
                     var alloca = LLVM.BuildAlloca(builder, type, $"Alloca_{local.VariableType.Name}");
                     Debug($"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
@@ -643,7 +644,7 @@ namespace PearlCLR.JIT
                 //TODO: Need a better way to compare...
                 if (localVariableType.IsPointer)
                 {
-                    var resolvePtrType = ResolveLLVMType(localVariableType);
+                    var resolvePtrType = _llvmTypeResolver.Resolve(localVariableType);
                     var store = ProcessStore(LLVM.BuildIntToPtr(builder, stackItem.ValRef.Value, resolvePtrType, "IntPtr"), localVariable);
                     Debug($"[Stloc_{localVariableIndex}] -> Popped {stackItem.ValRef.Value.TypeOf()} and Stored {store}");
                 }
