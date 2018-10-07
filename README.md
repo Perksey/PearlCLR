@@ -34,3 +34,9 @@ A scratchpad project written in C# that imports PearlCLRExtensions project for P
 ## PearlCLRRunner
 
 A project that simply import PearlCLR and Demo and run PearlCLR on compiled Demo library.
+
+# Frequently Asked Questions:
+
+## Why do I get an error, "System.AccessViolationException: Attempted to read or write protected memory. This is often an indication that other memory is corrupt" on Windows?
+
+This is a problem with LLVMSharp library, it is currently on the roadmap for PearCLR development to fix upstream to LLVMSharp or to create an alternative binding to LLVM-C API. LLVMSharp is known to work on Linux platform.
