@@ -214,15 +214,15 @@ namespace PearlCLR.JIT
             funcContext.FunctionRef = LLVM.AddFunction(_context.ModuleRef, isMain ? "main" : entryFunctionSymbol, funcContext.FunctionType);
 
             funcContext.CurrentBlockRef = LLVM.AppendBasicBlock(funcContext.FunctionRef, "entry");
-            var builder = LLVM.CreateBuilder();
-            LLVM.PositionBuilderAtEnd(builder, funcContext.CurrentBlockRef);
+            funcContext.Builder = LLVM.CreateBuilder();
+            LLVM.PositionBuilderAtEnd(funcContext.Builder, funcContext.CurrentBlockRef);
             foreach (var local in method.Body.Variables)
             {
                 _context.CLRLogger.Debug(local.VariableType.FullName);
                 if (local.VariableType.IsPointer)
                 {
                     funcContext.LocalVariableTypes.Add(local.VariableType);
-                    var alloca = LLVM.BuildAlloca(builder, _context.TypeResolver.Resolve(local.VariableType),
+                    var alloca = LLVM.BuildAlloca(funcContext.Builder, _context.TypeResolver.Resolve(local.VariableType),
                         $"Alloca_{local.VariableType.Name}");
                     _context.CLRLogger.Debug(
                         $"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
@@ -232,7 +232,7 @@ namespace PearlCLR.JIT
                 {
                     var type = _context.TypeResolver.Resolve(local.VariableType);
                     funcContext.LocalVariableTypes.Add(local.VariableType);
-                    var alloca = LLVM.BuildAlloca(builder, type, $"Alloca_{local.VariableType.Name}");
+                    var alloca = LLVM.BuildAlloca(funcContext.Builder, type, $"Alloca_{local.VariableType.Name}");
                     _context.CLRLogger.Debug(
                         $"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
                     funcContext.LocalVariables.Add(alloca);
@@ -243,7 +243,7 @@ namespace PearlCLR.JIT
                     if (!_context.FullSymbolToTypeRef.ContainsKey(local.VariableType.FullName))
                         _context.FullSymbolToTypeRef.Add(local.VariableType.FullName,
                             _context.TypeResolver.ProcessForStruct(local.VariableType.Resolve()));
-                    var alloca = LLVM.BuildAlloca(builder,
+                    var alloca = LLVM.BuildAlloca(funcContext.Builder,
                         LLVM.PointerType(_context.FullSymbolToTypeRef[local.VariableType.FullName].StructTypeRef, 0),
                         $"Alloca_{local.VariableType.MakePointerType().Name}");
                     _context.CLRLogger.Debug(
@@ -332,15 +332,15 @@ namespace PearlCLR.JIT
                 var terminator = item.Value.GetBasicBlockTerminator();
                 if (terminator.Pointer != IntPtr.Zero)
                     continue;
-                LLVM.PositionBuilderAtEnd(builder, item.Value);
+                LLVM.PositionBuilderAtEnd(funcContext.Builder, item.Value);
                 funcContext.CurrentBlockRef = item.Value;
                 ProcessInstructions(item.Key);
                 funcContext.ProcessedBranch.Add(item.Key);
             }
 
             funcContext.CurrentBlockRef.Dump();
-            if (LLVM.VerifyFunction(funcContext.CurrentBlockRef, LLVMVerifierFailureAction.LLVMPrintMessageAction) == new LLVMBool(1))
-                throw new Exception("Function is not well formed!");
+            //if (LLVM.VerifyFunction(funcContext.CurrentBlockRef, LLVMVerifierFailureAction.LLVMPrintMessageAction) == new LLVMBool(1))
+            //    throw new Exception("Function is not well formed!");
 
             _context.SymbolToCallableFunction.Add(entryFunctionSymbol, funcContext.CurrentBlockRef);
         }
