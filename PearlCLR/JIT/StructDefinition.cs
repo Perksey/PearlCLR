@@ -1,5 +1,4 @@
-﻿using System.Collections.Generic;
-using LLVMSharp;
+﻿using LLVMSharp;
 using Mono.Cecil;
 
 namespace PearlCLR.JIT
@@ -7,24 +6,24 @@ namespace PearlCLR.JIT
     public struct StructDefinition
     {
         /// <summary>
-        /// Struct Name on C# Side
+        ///     Struct Name on C# Side
         /// </summary>
         public string CS_StructName { get; set; }
-        
+
         /// <summary>
-        /// Struct Name on LLVM Side
+        ///     Struct Name on LLVM Side
         /// </summary>
         public string LL_StructName { get; set; }
-        
+
         public LLVMTypeRef StructTypeRef { get; set; }
-        
+
         /// <summary>
-        /// Field Definitions Parsed from C# Side
+        ///     Field Definitions Parsed from C# Side
         /// </summary>
         public FieldDefinition[] CS_FieldDefs { get; set; }
-        
+
         /// <summary>
-        /// Field Type References for LLVM
+        ///     Field Type References for LLVM
         /// </summary>
         public LLVMFieldDefAndRef[] LL_FieldTypeRefs { get; set; }
     }
