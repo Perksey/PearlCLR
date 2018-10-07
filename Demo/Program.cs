@@ -12,6 +12,5 @@ internal class Program
             Val += 5;
         Val += ptr;
         Console.WriteLine("%i\n", Val);
-        Console.ReadLine();
     }
 }

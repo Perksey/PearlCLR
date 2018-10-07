@@ -166,7 +166,7 @@ namespace PearlCLR.JIT
             }
         }
 
-        internal void ProcessFunction(MethodDefinition method, bool isMain = true, int indent = 0)
+        internal void ProcessFunction(MethodDefinition method, bool isMain = true)
         {
             _context.CLRLogger.Debug($"{method.FullName}");
             var funcContext = new FunctionContext {MethodDef = method, isMain = isMain};
