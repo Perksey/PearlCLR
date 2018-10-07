@@ -177,7 +177,7 @@ namespace PearlCLR.JIT
                 var lval = funcContext.BuilderStack.Pop();
                 var operand = (Instruction) instruction.Operand;
                 var branchToBlock = funcContext.BranchTo[operand];
-                funcContext.CurrentBlockRef = LLVM.AppendBasicBlock(funcContext.CurrentBlockRef, "branch");
+                funcContext.CurrentBlockRef = LLVM.AppendBasicBlock(funcContext.FunctionRef, "branch");
 
                 var cmp = LLVM.BuildICmp(funcContext.Builder, intCmp, lval.ValRef.Value,
                     rval.ValRef.Value, instruction.OpCode.ToString());
@@ -204,7 +204,7 @@ namespace PearlCLR.JIT
                 var lval = funcContext.BuilderStack.Pop();
                 var operand = (Instruction) instruction.Operand;
                 var branchToBlock = funcContext.BranchTo[operand];
-                funcContext.CurrentBlockRef = LLVM.AppendBasicBlock(funcContext.CurrentBlockRef, "branch");
+                funcContext.CurrentBlockRef = LLVM.AppendBasicBlock(funcContext.FunctionRef, "branch");
                 LLVMValueRef rval;
                 if (instruction.OpCode == OpCodes.Brtrue ||
                     instruction.OpCode == OpCodes.Brtrue_S)
