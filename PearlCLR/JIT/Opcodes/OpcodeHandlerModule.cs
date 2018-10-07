@@ -10,7 +10,20 @@ namespace PearlCLR.JIT
         {
             Context = context;
         }
-        public abstract bool CanRun(Instruction opcode);
-        public abstract void Build(Instruction opcode, FunctionContext context);
+        
+        public abstract bool CanRun(Instruction instruction);
+        public abstract BuildResult Build(Instruction instruction, FunctionContext funcContext);
+    }
+
+    public struct BuildResult
+    {
+        public bool Success { get; set; }
+        public bool BreakLoop { get; set; }
+
+        public BuildResult(bool success, bool breakLoop = false)
+        {
+            Success = success;
+            BreakLoop = breakLoop;
+        }
     }
 }
