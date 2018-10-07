@@ -170,6 +170,7 @@ namespace PearlCLR.JIT
                     var stackItem = new BuilderStackItem(lval.Type,
                         LLVM.BuildSDiv(funcContext.Builder, actualLVal, actualRVal, ""));
                     funcContext.BuilderStack.Push(stackItem);
+                    
                     Context.CLRLogger.Debug(
                         $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                 }
@@ -178,6 +179,7 @@ namespace PearlCLR.JIT
                     var stackItem = new BuilderStackItem(lval.Type,
                         LLVM.BuildFDiv(funcContext.Builder, lval.ValRef.Value, rval.ValRef.Value, ""));
                     funcContext.BuilderStack.Push(stackItem);
+                    
                     Context.CLRLogger.Debug(
                         $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                 }
@@ -212,6 +214,7 @@ namespace PearlCLR.JIT
                     var stackItem = new BuilderStackItem(lval.Type,
                         LLVM.BuildSRem(funcContext.Builder, actualLVal, actualRVal, ""));
                     funcContext.BuilderStack.Push(stackItem);
+                    
                     Context.CLRLogger.Debug(
                         $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                 }
@@ -220,6 +223,7 @@ namespace PearlCLR.JIT
                     var stackItem = new BuilderStackItem(lval.Type,
                         LLVM.BuildFRem(funcContext.Builder, lval.ValRef.Value, rval.ValRef.Value, ""));
                     funcContext.BuilderStack.Push(stackItem);
+                    
                     Context.CLRLogger.Debug(
                         $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                 }

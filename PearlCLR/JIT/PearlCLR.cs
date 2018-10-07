@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography.X509Certificates;
 using LLVMSharp;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -96,41 +97,30 @@ namespace PearlCLR.JIT
 
         public void ProcessMainModule()
         {
+            void ProcessWork(string msg,  params Action[] works)
+            {
+                _context.CLRLogger.Debug($"Started: {msg}");
+                foreach (var work in works)
+                    work();
+                _context.CLRLogger.Debug($"Completed: {msg}");
+            }
             LLVM.InstallFatalErrorHandler(reason => _context.CLRLogger.Debug(reason));
             LoadDependency();
             _context.CLRLogger.Info("Running Process Main Module");
-            _context.CLRLogger.Debug("Adding Critical Objects");
-            AddBCLObjects();
-            _context.CLRLogger.Debug("Added Critical Objects");
-            _context.CLRLogger.Debug("Processing all exported types");
-            ProcessAllExportedTypes();
-            _context.CLRLogger.Debug("Processed all exported types");
-            _context.CLRLogger.Debug("Processing all functions");
-            LoadOpcodeHandlerModules();
-            ProcessFunction(assembly.MainModule.EntryPoint);
-            _context.CLRLogger.Debug("Processed all functions");
-            _context.CLRLogger.Debug("Linking JIT");
-            LinkJIT();
-            _context.CLRLogger.Debug("Linked JIT");
-            _context.CLRLogger.Debug("Verifying LLVM emitted codes");
-            Verify();
-            _context.CLRLogger.Debug("Verified LLVM emitted codes");
-            _context.CLRLogger.Debug("Optimizing LLVM emitted codes");
-            Optimize();
-            _context.CLRLogger.Debug("Optimized LLVM emitted codes");
-            _context.CLRLogger.Debug("Compiling LLVM emitted codes");
-            Compile();
-            _context.CLRLogger.Debug("Compiled LLVM emitted codes");
-            _context.CLRLogger.Debug("Printing LLVM IR from Emitted LLVM Emitted Codes");
-            PrintToLLVMIR("MainModule.bc");
-            _context.CLRLogger.Debug("Printed LLVM IR from Emitted LLVM Emitted Codes");
-            _context.CLRLogger.Debug("Running Entry Function of Compiled LLVM Emitted Codes");
-            RunEntryFunction();
-            _context.CLRLogger.Debug("Entry Function of Compiled LLVM Emitted Codes concluded.");
+            ProcessWork("Adding Critical Objects", AddBCLObjects);
+            ProcessWork("Process all exported types", ProcessAllExportedTypes);
+            ProcessWork("Process all functions", LoadOpcodeHandlerModules, () => ProcessFunction(assembly.MainModule.EntryPoint));
+            ProcessWork("Link in JIT", LinkJIT);
+            ProcessWork("Verify LLVM emitted codes", Verify);
+            ProcessWork("Optimize LLVM emitted codes", Optimize);
+            ProcessWork("Compile LLVM emitted codes", Compile);
+            ProcessWork("Print emitted LLVM IR", () => PrintToLLVMIR("MainModule.bc"));
+            ProcessWork("Run entry function", RunEntryFunction);
         }
 
         private void Verify()
         {
+            LLVM.DumpModule(_context.ModuleRef);
             var passManager = LLVM.CreatePassManager();
             LLVM.AddVerifierPass(passManager);
             LLVM.RunPassManager(passManager, _context.ModuleRef);
@@ -139,13 +129,14 @@ namespace PearlCLR.JIT
 
         internal void LoadDependency()
         {
-            // We need printf!
-            if (Environment.OSVersion.Platform == PlatformID.Unix &&
-                LLVM.LoadLibraryPermanently("/usr/lib/libc.so.6") == new LLVMBool(1))
-                throw new Exception("Failed to load Libc!");
-            else if (Environment.OSVersion.Platform == PlatformID.Win32NT &&
-                LLVM.LoadLibraryPermanently("msvcrt.dll") == new LLVMBool(1))
-                throw new Exception("Failed to load msvcrt!");
+            switch (Environment.OSVersion.Platform)
+            {
+                // We need printf!
+                case PlatformID.Unix when LLVM.LoadLibraryPermanently("/usr/lib/libc.so.6") == new LLVMBool(1):
+                    throw new Exception("Failed to load Libc!");
+                case PlatformID.Win32NT when LLVM.LoadLibraryPermanently("msvcrt.dll") == new LLVMBool(1):
+                    throw new Exception("Failed to load msvcrt!");
+            }
 
             _context.CLRLogger.Info("Successfully loaded LibC Library.");
             var ptr = LLVM.SearchForAddressOfSymbol("printf");
@@ -211,44 +202,38 @@ namespace PearlCLR.JIT
             }
 
             funcContext.FunctionRef = LLVM.AddFunction(_context.ModuleRef, isMain ? "main" : entryFunctionSymbol, funcContext.FunctionType);
-
             funcContext.CurrentBlockRef = LLVM.AppendBasicBlock(funcContext.FunctionRef, "entry");
             funcContext.Builder = LLVM.CreateBuilder();
+            
             LLVM.PositionBuilderAtEnd(funcContext.Builder, funcContext.CurrentBlockRef);
+            
             foreach (var local in method.Body.Variables)
             {
+                LLVMValueRef alloca;
                 _context.CLRLogger.Debug(local.VariableType.FullName);
+                funcContext.LocalVariableTypes.Add(local.VariableType);
                 if (local.VariableType.IsPointer)
                 {
-                    funcContext.LocalVariableTypes.Add(local.VariableType);
-                    var alloca = LLVM.BuildAlloca(funcContext.Builder, _context.TypeResolver.Resolve(local.VariableType),
+                    alloca = LLVM.BuildAlloca(funcContext.Builder, _context.TypeResolver.Resolve(local.VariableType),
                         $"Alloca_{local.VariableType.Name}");
-                    _context.CLRLogger.Debug(
-                        $"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
-                    funcContext.LocalVariables.Add(alloca);
                 }
                 else if (local.VariableType.IsPrimitive)
                 {
                     var type = _context.TypeResolver.Resolve(local.VariableType);
-                    funcContext.LocalVariableTypes.Add(local.VariableType);
-                    var alloca = LLVM.BuildAlloca(funcContext.Builder, type, $"Alloca_{local.VariableType.Name}");
-                    _context.CLRLogger.Debug(
-                        $"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
-                    funcContext.LocalVariables.Add(alloca);
+                    alloca = LLVM.BuildAlloca(funcContext.Builder, type, $"Alloca_{local.VariableType.Name}");
                 }
                 else
                 {
-                    funcContext.LocalVariableTypes.Add(local.VariableType);
                     if (!_context.FullSymbolToTypeRef.ContainsKey(local.VariableType.FullName))
                         _context.FullSymbolToTypeRef.Add(local.VariableType.FullName,
                             _context.TypeResolver.ProcessForStruct(local.VariableType.Resolve()));
-                    var alloca = LLVM.BuildAlloca(funcContext.Builder,
+                    alloca = LLVM.BuildAlloca(funcContext.Builder,
                         LLVM.PointerType(_context.FullSymbolToTypeRef[local.VariableType.FullName].StructTypeRef, 0),
                         $"Alloca_{local.VariableType.MakePointerType().Name}");
-                    _context.CLRLogger.Debug(
-                        $"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
-                    funcContext.LocalVariables.Add(alloca);
                 }
+                _context.CLRLogger.Debug(
+                    $"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
+                funcContext.LocalVariables.Add(alloca);
             }
 
             // Handle Branch Blocks
@@ -375,6 +360,7 @@ namespace PearlCLR.JIT
 
             for (var passes = 0; passes < 10; ++passes)
                 LLVM.RunPassManager(pass, _context.ModuleRef);
+            LLVM.DumpModule(_context.ModuleRef);
         }
 
         private void Compile()
