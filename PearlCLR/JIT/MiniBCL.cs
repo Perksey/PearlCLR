@@ -42,5 +42,36 @@ namespace PearlCLR.JIT
 
         public static readonly TypeDefinition NativeIntType = new TypeDefinition("System", "IntPtr",
             TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.AutoLayout);
+        
+        public static bool IsTypeAnInteger(TypeReference reference)
+        {
+            switch (reference.FullName)
+            {
+                case "System.SByte":
+                case "System.Byte":
+                case "System.Int16":
+                case "System.UInt16":
+                case "System.Int32":
+                case "System.UInt32":
+                case "System.Int64":
+                case "System.UInt64":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        public static bool IsTypeARealNumber(TypeReference reference)
+        {
+            switch (reference.FullName)
+            {
+                case "System.Float":
+                case "System.Double":
+                case "System.Decimal":
+                    return true;
+                default:
+                    return false;
+            }
+        }
     }
 }

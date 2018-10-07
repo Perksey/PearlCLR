@@ -6,6 +6,7 @@ namespace PearlCLR.JIT
 {
     public class JITContext
     {
+        public PearlCLR CLR { get; set; }
         public LLVMContextRef ContextRef { get; set; }
         public LLVMModuleRef ModuleRef { get; set; }
 
