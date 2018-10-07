@@ -40,3 +40,10 @@ A project that simply import PearlCLR and Demo and run PearlCLR on compiled Demo
 ## Why do I get an error, "System.AccessViolationException: Attempted to read or write protected memory. This is often an indication that other memory is corrupt" on Windows?
 
 This is a problem with LLVMSharp library, it is currently on the roadmap for PearCLR development to fix upstream to LLVMSharp or to create an alternative binding to LLVM-C API. LLVMSharp is known to work on Linux platform.
+
+## Why not contribute to LLILC instead?
+
+There are two reasons:
+
+1. This CLR/JIT project is implemented in C#, not in C++.
+2. LLILC is a dead project, the last meaningful commit is in 2016 any commits after that are mostly packaging and documentation. https://github.com/dotnet/llilc/commits/master
