@@ -131,7 +131,6 @@ namespace PearlCLR.JIT
 
         private void Verify()
         {
-            LLVM.DumpModule(_context.ModuleRef);
             var passManager = LLVM.CreatePassManager();
             LLVM.AddVerifierPass(passManager);
             LLVM.RunPassManager(passManager, _context.ModuleRef);
@@ -144,9 +143,9 @@ namespace PearlCLR.JIT
             if (Environment.OSVersion.Platform == PlatformID.Unix &&
                 LLVM.LoadLibraryPermanently("/usr/lib/libc.so.6") == new LLVMBool(1))
                 throw new Exception("Failed to load Libc!");
-            if (Environment.OSVersion.Platform == PlatformID.Win32NT &&
+            else if (Environment.OSVersion.Platform == PlatformID.Win32NT &&
                 LLVM.LoadLibraryPermanently("msvcrt.dll") == new LLVMBool(1))
-                throw new Exception("Failed to load winvcrt!");
+                throw new Exception("Failed to load msvcrt!");
 
             _context.CLRLogger.Info("Successfully loaded LibC Library.");
             var ptr = LLVM.SearchForAddressOfSymbol("printf");
@@ -339,10 +338,10 @@ namespace PearlCLR.JIT
             }
 
             funcContext.CurrentBlockRef.Dump();
-            //if (LLVM.VerifyFunction(funcContext.CurrentBlockRef, LLVMVerifierFailureAction.LLVMPrintMessageAction) == new LLVMBool(1))
-            //    throw new Exception("Function is not well formed!");
+            if (LLVM.VerifyFunction(funcContext.FunctionRef, LLVMVerifierFailureAction.LLVMPrintMessageAction) != new LLVMBool(0))
+                throw new Exception("Function is not well formed!");
 
-            _context.SymbolToCallableFunction.Add(entryFunctionSymbol, funcContext.CurrentBlockRef);
+            _context.SymbolToCallableFunction.Add(entryFunctionSymbol, funcContext.FunctionRef);
         }
 
         private void LinkJIT()
@@ -380,7 +379,7 @@ namespace PearlCLR.JIT
 
         private void Compile()
         {
-            var options = new LLVMMCJITCompilerOptions {OptLevel = 3, CodeModel = LLVMCodeModel.LLVMCodeModelLarge};
+            var options = new LLVMMCJITCompilerOptions { NoFramePointerElim = 1, OptLevel = 3, CodeModel = LLVMCodeModel.LLVMCodeModelLarge};
             LLVM.InitializeMCJITCompilerOptions(options);
             if (LLVM.CreateMCJITCompilerForModule(out var compiler, _context.ModuleRef, options, out var error) !=
                 new LLVMBool(0))
@@ -388,16 +387,16 @@ namespace PearlCLR.JIT
                 _context.CLRLogger.Debug($"Error: {error}");
                 throw new Exception(error);
             }
-
             _context.EngineRef = compiler;
         }
 
         private void RunEntryFunction()
         {
             var entrySymbol = SymbolHelper.GetCSToLLVMSymbolName(assembly.MainModule.EntryPoint);
+            var symbol = _context.SymbolToCallableFunction[entrySymbol];
             var funcPtr =
-                LLVM.GetPointerToGlobal(_context.EngineRef, _context.SymbolToCallableFunction[entrySymbol]);
-            var mainFunc = Marshal.GetDelegateForFunctionPointer<EntryFunc_dt>(funcPtr);
+                LLVM.GetPointerToGlobal(_context.EngineRef, symbol);
+            var mainFunc = (EntryFunc_dt)Marshal.GetDelegateForFunctionPointer(funcPtr, typeof(EntryFunc_dt));
             mainFunc();
         }
 

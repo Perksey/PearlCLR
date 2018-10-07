@@ -3,6 +3,9 @@
     <OutputType>library</OutputType>
     <TargetFramework>netcoreapp2.1</TargetFramework>
   </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <Prefer32bit>false</Prefer32bit>
+  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="LLVMSharp" Version="5.0.0" />
     <PackageReference Include="Mono.Cecil" Version="0.10.0" />

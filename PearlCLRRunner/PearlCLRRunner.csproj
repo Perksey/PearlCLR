@@ -5,6 +5,11 @@
         <TargetFramework>netcoreapp2.1</TargetFramework>
     </PropertyGroup>
 
+    <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+      <Prefer32bit>false</Prefer32bit>
+      <PlatformTarget>AnyCPU</PlatformTarget>
+    </PropertyGroup>
+
     <ItemGroup>
       <ProjectReference Include="..\Demo\Demo.csproj" />
       <ProjectReference Include="..\PearlCLR\PearlCLR.csproj" />
