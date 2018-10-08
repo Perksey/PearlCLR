@@ -1,6 +1,8 @@
 # PearlCLR
 Unmanaged/Managed CLR Project in C#
 
+https://discord.gg/Ac5dPVn
+
 Created by Tyler Crandall
 
 Supports:
