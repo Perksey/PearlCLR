@@ -12,43 +12,45 @@ namespace PearlCLR.JIT
         {
         }
 
-        public override bool CanRun(Instruction instruction) =>
-            instruction.OpCode == OpCodes.Nop ||
-            instruction.OpCode == OpCodes.Initobj ||
-            instruction.OpCode == OpCodes.Dup ||
-            instruction.OpCode == OpCodes.Newobj ||
-            instruction.OpCode == OpCodes.Callvirt ||
-            instruction.OpCode == OpCodes.Call ||
-            instruction.OpCode == OpCodes.Box ||
-            instruction.OpCode == OpCodes.Br ||
-            instruction.OpCode == OpCodes.Br_S ||
-            instruction.OpCode == OpCodes.Beq ||
-            instruction.OpCode == OpCodes.Beq_S ||
-            instruction.OpCode == OpCodes.Bge ||
-            instruction.OpCode == OpCodes.Bge_S ||
-            instruction.OpCode == OpCodes.Bge_Un ||
-            instruction.OpCode == OpCodes.Bge_Un_S ||
-            instruction.OpCode == OpCodes.Bgt ||
-            instruction.OpCode == OpCodes.Bgt_S ||
-            instruction.OpCode == OpCodes.Bgt_Un ||
-            instruction.OpCode == OpCodes.Bgt_Un_S ||
-            instruction.OpCode == OpCodes.Ble ||
-            instruction.OpCode == OpCodes.Ble_S ||
-            instruction.OpCode == OpCodes.Ble_Un ||
-            instruction.OpCode == OpCodes.Ble_Un_S ||
-            instruction.OpCode == OpCodes.Blt ||
-            instruction.OpCode == OpCodes.Blt_S ||
-            instruction.OpCode == OpCodes.Blt_Un ||
-            instruction.OpCode == OpCodes.Blt_Un_S ||
-            instruction.OpCode == OpCodes.Bne_Un ||
-            instruction.OpCode == OpCodes.Bne_Un_S ||
-            instruction.OpCode == OpCodes.Brfalse ||
-            instruction.OpCode == OpCodes.Brfalse_S ||
-            instruction.OpCode == OpCodes.Brtrue ||
-            instruction.OpCode == OpCodes.Brtrue_S;
+        public override bool CanRun(Instruction instruction)
+        {
+            return instruction.OpCode == OpCodes.Nop ||
+                   instruction.OpCode == OpCodes.Initobj ||
+                   instruction.OpCode == OpCodes.Dup ||
+                   instruction.OpCode == OpCodes.Newobj ||
+                   instruction.OpCode == OpCodes.Callvirt ||
+                   instruction.OpCode == OpCodes.Call ||
+                   instruction.OpCode == OpCodes.Box ||
+                   instruction.OpCode == OpCodes.Br ||
+                   instruction.OpCode == OpCodes.Br_S ||
+                   instruction.OpCode == OpCodes.Beq ||
+                   instruction.OpCode == OpCodes.Beq_S ||
+                   instruction.OpCode == OpCodes.Bge ||
+                   instruction.OpCode == OpCodes.Bge_S ||
+                   instruction.OpCode == OpCodes.Bge_Un ||
+                   instruction.OpCode == OpCodes.Bge_Un_S ||
+                   instruction.OpCode == OpCodes.Bgt ||
+                   instruction.OpCode == OpCodes.Bgt_S ||
+                   instruction.OpCode == OpCodes.Bgt_Un ||
+                   instruction.OpCode == OpCodes.Bgt_Un_S ||
+                   instruction.OpCode == OpCodes.Ble ||
+                   instruction.OpCode == OpCodes.Ble_S ||
+                   instruction.OpCode == OpCodes.Ble_Un ||
+                   instruction.OpCode == OpCodes.Ble_Un_S ||
+                   instruction.OpCode == OpCodes.Blt ||
+                   instruction.OpCode == OpCodes.Blt_S ||
+                   instruction.OpCode == OpCodes.Blt_Un ||
+                   instruction.OpCode == OpCodes.Blt_Un_S ||
+                   instruction.OpCode == OpCodes.Bne_Un ||
+                   instruction.OpCode == OpCodes.Bne_Un_S ||
+                   instruction.OpCode == OpCodes.Brfalse ||
+                   instruction.OpCode == OpCodes.Brfalse_S ||
+                   instruction.OpCode == OpCodes.Brtrue ||
+                   instruction.OpCode == OpCodes.Brtrue_S;
+        }
 
         /// <summary>
-        /// Build LLVM instructions for provided CIL instruction
+        ///     Build LLVM instructions for provided CIL instruction
         /// </summary>
         /// <param name="instruction"></param>
         /// <param name="funcContext"></param>
@@ -60,13 +62,15 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug("[Nop]");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Initobj)
+
+            if (instruction.OpCode == OpCodes.Initobj)
             {
                 var item = funcContext.BuilderStack.Pop();
                 Context.CLRLogger.Debug($"[Initobj] -> Popped Stack Item {item.ValRef.Value}");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Dup)
+
+            if (instruction.OpCode == OpCodes.Dup)
             {
                 Context.CLRLogger.Debug("Attempting Dup");
                 var stackItem = funcContext.BuilderStack.Peek();
@@ -74,7 +78,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Dup] -> Pushed a Duplicate of {stackItem.ValRef.Value} onto Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Newobj)
+
+            if (instruction.OpCode == OpCodes.Newobj)
             {
                 var operand = (MethodDefinition) instruction.Operand;
                 LLVMValueRef valRef;
@@ -93,20 +98,23 @@ namespace PearlCLR.JIT
                     $"[Newobj {operand.FullName}] -> Called Ctor and pushed {funcContext.BuilderStack.Peek().ValRef.Value} to stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Callvirt ||
-                     instruction.OpCode == OpCodes.Call)
+
+            if (instruction.OpCode == OpCodes.Callvirt ||
+                instruction.OpCode == OpCodes.Call)
             {
                 ProcessCall(instruction, funcContext.Builder, funcContext.BuilderStack);
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Box)
+
+            if (instruction.OpCode == OpCodes.Box)
             {
                 var operand = (TypeReference) instruction.Operand;
                 Context.CLRLogger.Debug("[Box] -> Allocated as Reference {0}");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Br ||
-                     instruction.OpCode == OpCodes.Br_S)
+
+            if (instruction.OpCode == OpCodes.Br ||
+                instruction.OpCode == OpCodes.Br_S)
             {
                 var operand = (Instruction) instruction.Operand;
                 var branchToBlock = funcContext.BranchTo[operand];
@@ -196,10 +204,11 @@ namespace PearlCLR.JIT
                     $"[{instruction.OpCode} {operand}] -> Popped {lval} and {rval} and pushed {cmp} and branched to {funcContext.BranchTo}");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Brfalse ||
-                     instruction.OpCode == OpCodes.Brfalse_S ||
-                     instruction.OpCode == OpCodes.Brtrue ||
-                     instruction.OpCode == OpCodes.Brtrue_S)
+
+            if (instruction.OpCode == OpCodes.Brfalse ||
+                instruction.OpCode == OpCodes.Brfalse_S ||
+                instruction.OpCode == OpCodes.Brtrue ||
+                instruction.OpCode == OpCodes.Brtrue_S)
             {
                 var lval = funcContext.BuilderStack.Pop();
                 var operand = (Instruction) instruction.Operand;
@@ -218,10 +227,7 @@ namespace PearlCLR.JIT
                 LLVM.BuildCondBr(funcContext.Builder,
                     cmp,
                     funcContext.CurrentBlockRef, branchToBlock);
-                if (funcContext.BranchTo.ContainsKey(instruction.Next))
-                {
-                    return new BuildResult(true, true);
-                }
+                if (funcContext.BranchTo.ContainsKey(instruction.Next)) return new BuildResult(true, true);
 
                 LLVM.PositionBuilderAtEnd(funcContext.Builder, funcContext.CurrentBlockRef);
                 AddBlockToProcess(funcContext, instruction);
@@ -230,7 +236,8 @@ namespace PearlCLR.JIT
                     $"[{instruction.OpCode} {operand}] -> Created Branch");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ret)
+
+            if (instruction.OpCode == OpCodes.Ret)
             {
                 if (funcContext.MethodDef.ReturnType.FullName == "System.Void")
                 {

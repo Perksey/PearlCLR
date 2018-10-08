@@ -10,12 +10,14 @@ namespace PearlCLR.JIT
         {
         }
 
-        public override bool CanRun(Instruction instruction) =>
-            instruction.OpCode == OpCodes.Add ||
-            instruction.OpCode == OpCodes.Sub ||
-            instruction.OpCode == OpCodes.Mul ||
-            instruction.OpCode == OpCodes.Div ||
-            instruction.OpCode == OpCodes.Rem;
+        public override bool CanRun(Instruction instruction)
+        {
+            return instruction.OpCode == OpCodes.Add ||
+                   instruction.OpCode == OpCodes.Sub ||
+                   instruction.OpCode == OpCodes.Mul ||
+                   instruction.OpCode == OpCodes.Div ||
+                   instruction.OpCode == OpCodes.Rem;
+        }
 
         public override BuildResult Build(Instruction instruction, FunctionContext funcContext)
         {
@@ -59,9 +61,11 @@ namespace PearlCLR.JIT
                 {
                     throw new Exception("Unknown type, thus cannot add!");
                 }
+
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Sub)
+
+            if (instruction.OpCode == OpCodes.Sub)
             {
                 // TODO: Support conversion between Floating Point and Integers
                 var rval = funcContext.BuilderStack.Pop();
@@ -101,9 +105,11 @@ namespace PearlCLR.JIT
                 {
                     throw new Exception("Unknown type, thus cannot add!");
                 }
+
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Mul)
+
+            if (instruction.OpCode == OpCodes.Mul)
             {
                 // TODO: Support conversion between Floating Point and Integers
                 var rval = funcContext.BuilderStack.Pop();
@@ -143,9 +149,11 @@ namespace PearlCLR.JIT
                 {
                     throw new Exception("Unknown type, thus cannot add!");
                 }
+
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Div)
+
+            if (instruction.OpCode == OpCodes.Div)
             {
                 // TODO: Support conversion between Floating Point and Integers
                 var rval = funcContext.BuilderStack.Pop();
@@ -170,7 +178,7 @@ namespace PearlCLR.JIT
                     var stackItem = new BuilderStackItem(lval.Type,
                         LLVM.BuildSDiv(funcContext.Builder, actualLVal, actualRVal, ""));
                     funcContext.BuilderStack.Push(stackItem);
-                    
+
                     Context.CLRLogger.Debug(
                         $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                 }
@@ -179,7 +187,7 @@ namespace PearlCLR.JIT
                     var stackItem = new BuilderStackItem(lval.Type,
                         LLVM.BuildFDiv(funcContext.Builder, lval.ValRef.Value, rval.ValRef.Value, ""));
                     funcContext.BuilderStack.Push(stackItem);
-                    
+
                     Context.CLRLogger.Debug(
                         $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                 }
@@ -187,9 +195,11 @@ namespace PearlCLR.JIT
                 {
                     throw new Exception("Unknown type, thus cannot add!");
                 }
+
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Rem)
+
+            if (instruction.OpCode == OpCodes.Rem)
             {
                 // TODO: Support conversion between Floating Point and Integers
                 var rval = funcContext.BuilderStack.Pop();
@@ -214,7 +224,7 @@ namespace PearlCLR.JIT
                     var stackItem = new BuilderStackItem(lval.Type,
                         LLVM.BuildSRem(funcContext.Builder, actualLVal, actualRVal, ""));
                     funcContext.BuilderStack.Push(stackItem);
-                    
+
                     Context.CLRLogger.Debug(
                         $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                 }
@@ -223,7 +233,7 @@ namespace PearlCLR.JIT
                     var stackItem = new BuilderStackItem(lval.Type,
                         LLVM.BuildFRem(funcContext.Builder, lval.ValRef.Value, rval.ValRef.Value, ""));
                     funcContext.BuilderStack.Push(stackItem);
-                    
+
                     Context.CLRLogger.Debug(
                         $"[Sub] -> Popped {rval.ValRef.Value} and {lval.ValRef.Value} and Pushed {stackItem.ValRef.Value}");
                 }
@@ -231,6 +241,7 @@ namespace PearlCLR.JIT
                 {
                     throw new Exception("Unknown type, thus cannot add!");
                 }
+
                 return new BuildResult(true);
             }
 

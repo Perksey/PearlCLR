@@ -4,13 +4,13 @@ namespace PearlCLR.JIT
 {
     public abstract class OpcodeHandlerModule
     {
-        protected JITContext Context { get; }
-
         protected OpcodeHandlerModule(JITContext context)
         {
             Context = context;
         }
-        
+
+        protected JITContext Context { get; }
+
         public abstract bool CanRun(Instruction instruction);
         public abstract BuildResult Build(Instruction instruction, FunctionContext funcContext);
     }

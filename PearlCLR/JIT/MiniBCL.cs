@@ -42,7 +42,7 @@ namespace PearlCLR.JIT
 
         public static readonly TypeDefinition NativeIntType = new TypeDefinition("System", "IntPtr",
             TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.AutoLayout);
-        
+
         public static bool IsTypeAnInteger(TypeReference reference)
         {
             switch (reference.FullName)

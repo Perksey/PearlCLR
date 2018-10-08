@@ -12,21 +12,23 @@ namespace PearlCLR.JIT
         {
         }
 
-        public override bool CanRun(Instruction instruction) =>
-            instruction.OpCode == OpCodes.Ldloca_S ||
-            instruction.OpCode == OpCodes.Ldloc_S ||
-            instruction.OpCode == OpCodes.Ldloc_0 ||
-            instruction.OpCode == OpCodes.Ldloc_1 ||
-            instruction.OpCode == OpCodes.Ldloc_2 ||
-            instruction.OpCode == OpCodes.Ldloc_3 ||
-            instruction.OpCode == OpCodes.Stloc_0 ||
-            instruction.OpCode == OpCodes.Stloc_1 ||
-            instruction.OpCode == OpCodes.Stloc_2 ||
-            instruction.OpCode == OpCodes.Stloc_3 ||
-            instruction.OpCode == OpCodes.Stloc_S ||
-            instruction.OpCode == OpCodes.Stind_I1 ||
-            instruction.OpCode == OpCodes.Stfld ||
-            instruction.OpCode == OpCodes.Ldfld;
+        public override bool CanRun(Instruction instruction)
+        {
+            return instruction.OpCode == OpCodes.Ldloca_S ||
+                   instruction.OpCode == OpCodes.Ldloc_S ||
+                   instruction.OpCode == OpCodes.Ldloc_0 ||
+                   instruction.OpCode == OpCodes.Ldloc_1 ||
+                   instruction.OpCode == OpCodes.Ldloc_2 ||
+                   instruction.OpCode == OpCodes.Ldloc_3 ||
+                   instruction.OpCode == OpCodes.Stloc_0 ||
+                   instruction.OpCode == OpCodes.Stloc_1 ||
+                   instruction.OpCode == OpCodes.Stloc_2 ||
+                   instruction.OpCode == OpCodes.Stloc_3 ||
+                   instruction.OpCode == OpCodes.Stloc_S ||
+                   instruction.OpCode == OpCodes.Stind_I1 ||
+                   instruction.OpCode == OpCodes.Stfld ||
+                   instruction.OpCode == OpCodes.Ldfld;
+        }
 
         public override BuildResult Build(Instruction instruction, FunctionContext funcContext)
         {
@@ -40,7 +42,8 @@ namespace PearlCLR.JIT
                     $"[Ldloca_S {def.Index}] -> Pushed Local Variable {stackItem.ValRef.Value} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldloc_S)
+
+            if (instruction.OpCode == OpCodes.Ldloc_S)
             {
                 var def = (VariableDefinition) instruction.Operand;
                 var stackItem = new BuilderStackItem(funcContext.MethodDef.Body.Variables[def.Index].VariableType,
@@ -50,7 +53,8 @@ namespace PearlCLR.JIT
                     $"[Ldloc_S {def.Index}] -> Pushed Local Variable {stackItem.ValRef.Value} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldloc_0)
+
+            if (instruction.OpCode == OpCodes.Ldloc_0)
             {
                 var stackItem = new BuilderStackItem(funcContext.MethodDef.Body.Variables[0].VariableType,
                     LLVM.BuildLoad(funcContext.Builder, funcContext.LocalVariables[0], ""));
@@ -58,7 +62,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldloc_0] -> Pushed Local Variable {stackItem.ValRef.Value} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldloc_1)
+
+            if (instruction.OpCode == OpCodes.Ldloc_1)
             {
                 var stackItem = new BuilderStackItem(funcContext.MethodDef.Body.Variables[1].VariableType,
                     LLVM.BuildLoad(funcContext.Builder, funcContext.LocalVariables[1], ""));
@@ -66,7 +71,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldloc_1] -> Pushed Local Variable {stackItem.ValRef.Value} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldloc_2)
+
+            if (instruction.OpCode == OpCodes.Ldloc_2)
             {
                 var stackItem = new BuilderStackItem(funcContext.MethodDef.Body.Variables[2].VariableType,
                     LLVM.BuildLoad(funcContext.Builder, funcContext.LocalVariables[2], ""));
@@ -74,7 +80,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldloc_2] -> Pushed Local Variable {stackItem.ValRef.Value} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldloc_3)
+
+            if (instruction.OpCode == OpCodes.Ldloc_3)
             {
                 var stackItem = new BuilderStackItem(funcContext.MethodDef.Body.Variables[3].VariableType,
                     LLVM.BuildLoad(funcContext.Builder, funcContext.LocalVariables[3], ""));
@@ -82,38 +89,44 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldloc_3] -> Pushed Local Variable {stackItem.ValRef.Value} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Stloc_0)
+
+            if (instruction.OpCode == OpCodes.Stloc_0)
             {
                 var val = funcContext.BuilderStack.Pop();
                 ProcessStoreLoc(funcContext, val, 0);
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Stloc_1)
+
+            if (instruction.OpCode == OpCodes.Stloc_1)
             {
                 var val = funcContext.BuilderStack.Pop();
                 ProcessStoreLoc(funcContext, val, 1);
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Stloc_2)
+
+            if (instruction.OpCode == OpCodes.Stloc_2)
             {
                 var val = funcContext.BuilderStack.Pop();
                 ProcessStoreLoc(funcContext, val, 2);
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Stloc_3)
+
+            if (instruction.OpCode == OpCodes.Stloc_3)
             {
                 var val = funcContext.BuilderStack.Pop();
                 ProcessStoreLoc(funcContext, val, 3);
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Stloc_S)
+
+            if (instruction.OpCode == OpCodes.Stloc_S)
             {
                 var index = (VariableDefinition) instruction.Operand;
                 var val = funcContext.BuilderStack.Pop();
                 ProcessStoreLoc(funcContext, val, index.Index);
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Stind_I1)
+
+            if (instruction.OpCode == OpCodes.Stind_I1)
             {
                 var val = funcContext.BuilderStack.Pop();
                 var cast = LLVM.BuildZExt(funcContext.Builder, val.ValRef.Value, LLVM.Int8Type(), "");
@@ -128,7 +141,8 @@ namespace PearlCLR.JIT
                     $"[Stind_I1] -> Popped {val.ValRef.Value} and {address.ValRef.Value} and Stored into address: {store}");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Stfld)
+
+            if (instruction.OpCode == OpCodes.Stfld)
             {
                 var fieldDef = (FieldDefinition) instruction.Operand;
                 var value = funcContext.BuilderStack.Pop();
@@ -155,7 +169,8 @@ namespace PearlCLR.JIT
                     $"[Stfld {fieldDef.FullName}] -> Popped {value.ValRef.Value} and {refToStruct.TypeOf()} and Store {value.ValRef.Value} into {offset}");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldfld)
+
+            if (instruction.OpCode == OpCodes.Ldfld)
             {
                 var fieldDef = (FieldDefinition) instruction.Operand;
                 var structRef = funcContext.BuilderStack.Pop();

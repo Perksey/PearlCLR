@@ -10,10 +10,12 @@ namespace PearlCLR.JIT
         {
         }
 
-        public override bool CanRun(Instruction instruction) =>
-            instruction.OpCode == OpCodes.Clt ||
-            instruction.OpCode == OpCodes.Cgt ||
-            instruction.OpCode == OpCodes.Ceq;
+        public override bool CanRun(Instruction instruction)
+        {
+            return instruction.OpCode == OpCodes.Clt ||
+                   instruction.OpCode == OpCodes.Cgt ||
+                   instruction.OpCode == OpCodes.Ceq;
+        }
 
         public override BuildResult Build(Instruction instruction, FunctionContext funcContext)
         {
@@ -40,7 +42,8 @@ namespace PearlCLR.JIT
                 funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type, cmp));
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Cgt)
+
+            if (instruction.OpCode == OpCodes.Cgt)
             {
                 var rval = funcContext.BuilderStack.Pop().ValRef.Value;
                 var lval = funcContext.BuilderStack.Pop().ValRef.Value;
@@ -63,7 +66,8 @@ namespace PearlCLR.JIT
                 funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type, cmp));
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ceq)
+
+            if (instruction.OpCode == OpCodes.Ceq)
             {
                 var rval = funcContext.BuilderStack.Pop().ValRef.Value;
                 var lval = funcContext.BuilderStack.Pop().ValRef.Value;

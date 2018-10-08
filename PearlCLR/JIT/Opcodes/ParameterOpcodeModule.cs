@@ -9,12 +9,14 @@ namespace PearlCLR.JIT
         {
         }
 
-        public override bool CanRun(Instruction instruction) =>
-            instruction.OpCode == OpCodes.Ldarg_0 ||
-            instruction.OpCode == OpCodes.Ldarg_1 ||
-            instruction.OpCode == OpCodes.Ldarg_2 ||
-            instruction.OpCode == OpCodes.Ldarg_3 ||
-            instruction.OpCode == OpCodes.Ldarg;
+        public override bool CanRun(Instruction instruction)
+        {
+            return instruction.OpCode == OpCodes.Ldarg_0 ||
+                   instruction.OpCode == OpCodes.Ldarg_1 ||
+                   instruction.OpCode == OpCodes.Ldarg_2 ||
+                   instruction.OpCode == OpCodes.Ldarg_3 ||
+                   instruction.OpCode == OpCodes.Ldarg;
+        }
 
         public override BuildResult Build(Instruction instruction, FunctionContext funcContext)
         {
@@ -31,7 +33,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldarg_0] -> {LLVM.GetFirstParam(funcContext.FunctionRef)} pushed to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldarg_1)
+
+            if (instruction.OpCode == OpCodes.Ldarg_1)
             {
                 funcContext.BuilderStack.Push(
                     new BuilderStackItem(
@@ -40,7 +43,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldarg_1] -> {LLVM.GetParams(funcContext.FunctionRef)[1]} pushed to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldarg_2)
+
+            if (instruction.OpCode == OpCodes.Ldarg_2)
             {
                 funcContext.BuilderStack.Push(
                     new BuilderStackItem(
@@ -49,7 +53,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldarg_2] -> {LLVM.GetParams(funcContext.FunctionRef)[2]} pushed to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldarg_3)
+
+            if (instruction.OpCode == OpCodes.Ldarg_3)
             {
                 funcContext.BuilderStack.Push(
                     new BuilderStackItem(
@@ -58,7 +63,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldarg_3] -> {LLVM.GetParams(funcContext.FunctionRef)[3]} pushed to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldarg)
+
+            if (instruction.OpCode == OpCodes.Ldarg)
             {
                 var varDef = (VariableDefinition) instruction.Operand;
                 funcContext.BuilderStack.Push(new BuilderStackItem(
@@ -69,6 +75,7 @@ namespace PearlCLR.JIT
                     $"[Ldarg {varDef.Index}] -> {LLVM.GetParams(funcContext.FunctionRef)[1]} pushed to Stack");
                 return new BuildResult(true);
             }
+
             return new BuildResult(false);
         }
     }

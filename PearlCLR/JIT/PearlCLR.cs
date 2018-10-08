@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography.X509Certificates;
 using LLVMSharp;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -13,6 +12,8 @@ namespace PearlCLR.JIT
 {
     public class PearlCLR
     {
+        private readonly List<OpcodeHandlerModule> OpcodeHandlers = new List<OpcodeHandlerModule>();
+
         public PearlCLR(string file, string target = null)
         {
             assembly = AssemblyDefinition.ReadAssembly(file);
@@ -39,7 +40,6 @@ namespace PearlCLR.JIT
 
         private JITCompilerOptions _options { get; } = new JITCompilerOptions();
         private JITContext _context { get; }
-        private List<OpcodeHandlerModule> OpcodeHandlers = new List<OpcodeHandlerModule>();
 
         private void LoadOpcodeHandlerModules()
         {
@@ -97,19 +97,21 @@ namespace PearlCLR.JIT
 
         public void ProcessMainModule()
         {
-            void ProcessWork(string msg,  params Action[] works)
+            void ProcessWork(string msg, params Action[] works)
             {
                 _context.CLRLogger.Debug($"Started: {msg}");
                 foreach (var work in works)
                     work();
                 _context.CLRLogger.Debug($"Completed: {msg}");
             }
+
             LLVM.InstallFatalErrorHandler(reason => _context.CLRLogger.Debug(reason));
             LoadDependency();
             _context.CLRLogger.Info("Running Process Main Module");
             ProcessWork("Adding Critical Objects", AddBCLObjects);
             ProcessWork("Process all exported types", ProcessAllExportedTypes);
-            ProcessWork("Process all functions", LoadOpcodeHandlerModules, () => ProcessFunction(assembly.MainModule.EntryPoint));
+            ProcessWork("Process all functions", LoadOpcodeHandlerModules,
+                () => ProcessFunction(assembly.MainModule.EntryPoint));
             ProcessWork("Link in JIT", LinkJIT);
             ProcessWork("Verify LLVM emitted codes", Verify);
             ProcessWork("Optimize LLVM emitted codes", Optimize);
@@ -169,7 +171,7 @@ namespace PearlCLR.JIT
         internal void ProcessFunction(MethodDefinition method, bool isMain = true)
         {
             _context.CLRLogger.Debug($"{method.FullName}");
-            var funcContext = new FunctionContext {MethodDef = method, isMain = isMain};
+            var funcContext = new FunctionContext {MethodDef = method, IsMain = isMain};
 
             if (method.HasThis)
                 funcContext.FunctionType = LLVM.FunctionType(
@@ -197,16 +199,18 @@ namespace PearlCLR.JIT
                 if (method.PInvokeInfo.Module.Name != "__internal")
                     throw new NotSupportedException("Does not support actual P/Invoke just yet.");
 
-                _context.SymbolToCallableFunction.Add(SymbolHelper.GetCSToLLVMSymbolName(method), funcContext.CurrentBlockRef);
+                _context.SymbolToCallableFunction.Add(SymbolHelper.GetCSToLLVMSymbolName(method),
+                    funcContext.CurrentBlockRef);
                 return;
             }
 
-            funcContext.FunctionRef = LLVM.AddFunction(_context.ModuleRef, isMain ? "main" : entryFunctionSymbol, funcContext.FunctionType);
+            funcContext.FunctionRef = LLVM.AddFunction(_context.ModuleRef, isMain ? "main" : entryFunctionSymbol,
+                funcContext.FunctionType);
             funcContext.CurrentBlockRef = LLVM.AppendBasicBlock(funcContext.FunctionRef, "entry");
             funcContext.Builder = LLVM.CreateBuilder();
-            
+
             LLVM.PositionBuilderAtEnd(funcContext.Builder, funcContext.CurrentBlockRef);
-            
+
             foreach (var local in method.Body.Variables)
             {
                 LLVMValueRef alloca;
@@ -231,6 +235,7 @@ namespace PearlCLR.JIT
                         LLVM.PointerType(_context.FullSymbolToTypeRef[local.VariableType.FullName].StructTypeRef, 0),
                         $"Alloca_{local.VariableType.MakePointerType().Name}");
                 }
+
                 _context.CLRLogger.Debug(
                     $"Local variable defined: {local.VariableType.Name} - {alloca} with Type Of {alloca.TypeOf()}");
                 funcContext.LocalVariables.Add(alloca);
@@ -287,24 +292,19 @@ namespace PearlCLR.JIT
                     foreach (var handler in OpcodeHandlers)
                     {
                         result = handler.Build(instruction, funcContext);
-                        if (result.BreakLoop)
-                        {
-                            goto BreakLoop;
-                        }
+                        if (result.BreakLoop) goto BreakLoop;
 
                         if (result.Success)
                             break;
                     }
-                    
-                    if (result.Success)
-                    {
-                        continue;
-                    }
+
+                    if (result.Success) continue;
 
                     _context.CLRLogger.Debug($"Unhandled Opcode: {instruction.OpCode.ToString()}");
                     throw new Exception($"Unhandled Opcode: {instruction.OpCode.ToString()}");
                 } while (instruction.Next != null);
-                BreakLoop:;
+
+                BreakLoop: ;
             }
 
             var first = method.Body.Instructions.First();
@@ -323,7 +323,8 @@ namespace PearlCLR.JIT
             }
 
             funcContext.CurrentBlockRef.Dump();
-            if (LLVM.VerifyFunction(funcContext.FunctionRef, LLVMVerifierFailureAction.LLVMPrintMessageAction) != new LLVMBool(0))
+            if (LLVM.VerifyFunction(funcContext.FunctionRef, LLVMVerifierFailureAction.LLVMPrintMessageAction) !=
+                new LLVMBool(0))
                 throw new Exception("Function is not well formed!");
 
             _context.SymbolToCallableFunction.Add(entryFunctionSymbol, funcContext.FunctionRef);
@@ -365,7 +366,8 @@ namespace PearlCLR.JIT
 
         private void Compile()
         {
-            var options = new LLVMMCJITCompilerOptions { NoFramePointerElim = 1, OptLevel = 3, CodeModel = LLVMCodeModel.LLVMCodeModelLarge};
+            var options = new LLVMMCJITCompilerOptions
+                {NoFramePointerElim = 1, OptLevel = 3, CodeModel = LLVMCodeModel.LLVMCodeModelLarge};
             LLVM.InitializeMCJITCompilerOptions(options);
             if (LLVM.CreateMCJITCompilerForModule(out var compiler, _context.ModuleRef, options, out var error) !=
                 new LLVMBool(0))
@@ -373,6 +375,7 @@ namespace PearlCLR.JIT
                 _context.CLRLogger.Debug($"Error: {error}");
                 throw new Exception(error);
             }
+
             _context.EngineRef = compiler;
         }
 
@@ -382,7 +385,7 @@ namespace PearlCLR.JIT
             var symbol = _context.SymbolToCallableFunction[entrySymbol];
             var funcPtr =
                 LLVM.GetPointerToGlobal(_context.EngineRef, symbol);
-            var mainFunc = (EntryFunc_dt)Marshal.GetDelegateForFunctionPointer(funcPtr, typeof(EntryFunc_dt));
+            var mainFunc = (EntryFunc_dt) Marshal.GetDelegateForFunctionPointer(funcPtr, typeof(EntryFunc_dt));
             mainFunc();
         }
 

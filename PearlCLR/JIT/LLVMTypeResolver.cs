@@ -79,10 +79,6 @@ namespace PearlCLR.JIT
 
             if (type.BaseType != null && type.FullName != type.BaseType.FullName)
             {
-                if (type.BaseType.FullName == "System.Object")
-                {
-                }
-
                 var declaredTypeFields = ResolveAllFields(type.BaseType.Resolve());
                 foreach (var field in declaredTypeFields) Fields.Push(field);
             }
@@ -119,8 +115,7 @@ namespace PearlCLR.JIT
         {
             return new LLVMFieldDefAndRef(fieldType, Resolve(fieldType));
         }
-
-
+        
         private static class TypeReferenceName
         {
             public const string Void = "System.Void";

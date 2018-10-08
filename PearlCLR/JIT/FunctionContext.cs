@@ -9,9 +9,13 @@ namespace PearlCLR.JIT
     {
         public MethodDefinition MethodDef { get; set; }
         public List<TypeReference> LocalVariableTypes { get; set; } = new List<TypeReference>();
-        
-        public Dictionary<Instruction, LLVMBasicBlockRef> BranchTo { get; set; } = new Dictionary<Instruction, LLVMBasicBlockRef>();
-        public Stack<KeyValuePair<Instruction, LLVMBasicBlockRef>> BranchToProcess { get; set; } = new Stack<KeyValuePair<Instruction, LLVMBasicBlockRef>>();
+
+        public Dictionary<Instruction, LLVMBasicBlockRef> BranchTo { get; set; } =
+            new Dictionary<Instruction, LLVMBasicBlockRef>();
+
+        public Stack<KeyValuePair<Instruction, LLVMBasicBlockRef>> BranchToProcess { get; set; } =
+            new Stack<KeyValuePair<Instruction, LLVMBasicBlockRef>>();
+
         public List<Instruction> ProcessedBranch { get; set; } = new List<Instruction>();
 
         public LLVMBuilderRef Builder { get; set; }
@@ -20,11 +24,8 @@ namespace PearlCLR.JIT
         public LLVMTypeRef FunctionType { get; set; }
         public List<LLVMValueRef> LocalVariables { get; set; } = new List<LLVMValueRef>();
         public LLVMBasicBlockRef CurrentBlockRef { get; set; }
-        
-        public bool isMain { get; set; }
-        public int PrependTabs { get; set; } = 0;
-        
 
-        
+        public bool IsMain { get; set; }
+        public int PrependTabs { get; set; } = 0;
     }
 }

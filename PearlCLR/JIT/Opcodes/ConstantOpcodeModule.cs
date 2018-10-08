@@ -10,27 +10,29 @@ namespace PearlCLR.JIT
         {
         }
 
-        public override bool CanRun(Instruction instruction) =>
-            instruction.OpCode == OpCodes.Ldind_U1 ||
-            instruction.OpCode == OpCodes.Ldind_I ||
-            instruction.OpCode == OpCodes.Ldc_I4 ||
-            instruction.OpCode == OpCodes.Ldc_I4_S ||
-            instruction.OpCode == OpCodes.Ldc_I4_0 ||
-            instruction.OpCode == OpCodes.Ldc_I4_1 ||
-            instruction.OpCode == OpCodes.Ldc_I4_2 ||
-            instruction.OpCode == OpCodes.Ldc_I4_3 ||
-            instruction.OpCode == OpCodes.Ldc_I4_4 ||
-            instruction.OpCode == OpCodes.Ldc_I4_5 ||
-            instruction.OpCode == OpCodes.Ldc_I4_6 ||
-            instruction.OpCode == OpCodes.Ldc_I4_7 ||
-            instruction.OpCode == OpCodes.Ldc_I4_8 ||
-            instruction.OpCode == OpCodes.Ldc_I4_M1 ||
-            instruction.OpCode == OpCodes.Ldc_I8 ||
-            instruction.OpCode == OpCodes.Ldc_R4 ||
-            instruction.OpCode == OpCodes.Ldc_R8 ||
-            instruction.OpCode == OpCodes.Ldnull ||
-            instruction.OpCode == OpCodes.Ldftn ||
-            instruction.OpCode == OpCodes.Ldstr;
+        public override bool CanRun(Instruction instruction)
+        {
+            return instruction.OpCode == OpCodes.Ldind_U1 ||
+                   instruction.OpCode == OpCodes.Ldind_I ||
+                   instruction.OpCode == OpCodes.Ldc_I4 ||
+                   instruction.OpCode == OpCodes.Ldc_I4_S ||
+                   instruction.OpCode == OpCodes.Ldc_I4_0 ||
+                   instruction.OpCode == OpCodes.Ldc_I4_1 ||
+                   instruction.OpCode == OpCodes.Ldc_I4_2 ||
+                   instruction.OpCode == OpCodes.Ldc_I4_3 ||
+                   instruction.OpCode == OpCodes.Ldc_I4_4 ||
+                   instruction.OpCode == OpCodes.Ldc_I4_5 ||
+                   instruction.OpCode == OpCodes.Ldc_I4_6 ||
+                   instruction.OpCode == OpCodes.Ldc_I4_7 ||
+                   instruction.OpCode == OpCodes.Ldc_I4_8 ||
+                   instruction.OpCode == OpCodes.Ldc_I4_M1 ||
+                   instruction.OpCode == OpCodes.Ldc_I8 ||
+                   instruction.OpCode == OpCodes.Ldc_R4 ||
+                   instruction.OpCode == OpCodes.Ldc_R8 ||
+                   instruction.OpCode == OpCodes.Ldnull ||
+                   instruction.OpCode == OpCodes.Ldftn ||
+                   instruction.OpCode == OpCodes.Ldstr;
+        }
 
 
         public override BuildResult Build(Instruction instruction, FunctionContext funcContext)
@@ -57,7 +59,8 @@ namespace PearlCLR.JIT
                     $"[Ldind_U1] -> Popped Stack Item {val.ValRef.Value}, Loaded and Casted to Int32 Type {cast}");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldind_I)
+
+            if (instruction.OpCode == OpCodes.Ldind_I)
             {
                 var val = funcContext.BuilderStack.Pop();
                 // TODO: Support Native Integer conversion
@@ -89,7 +92,8 @@ namespace PearlCLR.JIT
                     $"[Ldind_I] -> Popped Stack Item {val.ValRef.Value} and Casted to Int64 Type {cast}");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldc_I4)
+
+            if (instruction.OpCode == OpCodes.Ldc_I4)
             {
                 var operand = (int) instruction.Operand;
                 var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(Context.ContextRef), (ulong) operand,
@@ -99,7 +103,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldc_I4 {operand}] -> Pushed {stackItem} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldc_I4_S)
+
+            if (instruction.OpCode == OpCodes.Ldc_I4_S)
             {
                 var operand = (sbyte) instruction.Operand;
                 var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(Context.ContextRef), (ulong) operand,
@@ -109,7 +114,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldc_I4_S {operand}] -> Pushed {stackItem} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldc_I4_0)
+
+            if (instruction.OpCode == OpCodes.Ldc_I4_0)
             {
                 var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(Context.ContextRef), 0, true);
                 funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
@@ -117,7 +123,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldc_I4_0] -> Pushed {stackItem} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldc_I4_1)
+
+            if (instruction.OpCode == OpCodes.Ldc_I4_1)
             {
                 var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(Context.ContextRef), 1, true);
                 funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
@@ -125,7 +132,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldc_I4_1] -> Pushed {stackItem} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldc_I4_2)
+
+            if (instruction.OpCode == OpCodes.Ldc_I4_2)
             {
                 var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(Context.ContextRef), 2, true);
                 funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
@@ -133,7 +141,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldc_I4_2] -> Pushed {stackItem} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldc_I4_3)
+
+            if (instruction.OpCode == OpCodes.Ldc_I4_3)
             {
                 var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(Context.ContextRef), 3, true);
                 funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
@@ -141,7 +150,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldc_I4_3] -> Pushed {stackItem} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldc_I4_4)
+
+            if (instruction.OpCode == OpCodes.Ldc_I4_4)
             {
                 var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(Context.ContextRef), 4, true);
                 funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
@@ -149,7 +159,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldc_I4_4] -> Pushed {stackItem} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldc_I4_5)
+
+            if (instruction.OpCode == OpCodes.Ldc_I4_5)
             {
                 var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(Context.ContextRef), 5, true);
                 funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
@@ -157,7 +168,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldc_I4_5] -> Pushed {stackItem} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldc_I4_6)
+
+            if (instruction.OpCode == OpCodes.Ldc_I4_6)
             {
                 var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(Context.ContextRef), 6, true);
                 funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
@@ -165,7 +177,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldc_I4_6] -> Pushed {stackItem} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldc_I4_7)
+
+            if (instruction.OpCode == OpCodes.Ldc_I4_7)
             {
                 var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(Context.ContextRef), 7, true);
                 funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
@@ -173,7 +186,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldc_I4_7] -> Pushed {stackItem} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldc_I4_8)
+
+            if (instruction.OpCode == OpCodes.Ldc_I4_8)
             {
                 var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(Context.ContextRef), 8, true);
                 funcContext.BuilderStack.Push(new BuilderStackItem(MiniBCL.Int32Type,
@@ -181,8 +195,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldc_I4_8] -> Pushed {stackItem} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldc_I4_M1)
-            {
+
+            if (instruction.OpCode == OpCodes.Ldc_I4_M1)
                 unchecked
                 {
                     var stackItem = LLVM.ConstInt(LLVM.Int32TypeInContext(Context.ContextRef), (ulong) -1,
@@ -192,8 +206,8 @@ namespace PearlCLR.JIT
                     Context.CLRLogger.Debug($"[Ldc_I4_M1] -> Pushed {stackItem} to Stack");
                     return new BuildResult(true);
                 }
-            }
-            else if (instruction.OpCode == OpCodes.Ldc_I8)
+
+            if (instruction.OpCode == OpCodes.Ldc_I8)
             {
                 var stackItem = new BuilderStackItem(MiniBCL.Int64Type,
                     LLVM.ConstInt(LLVM.Int64TypeInContext(Context.ContextRef), (ulong) instruction.Operand,
@@ -202,7 +216,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldc_I8] -> Pushed {stackItem.ValRef.Value} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldc_R4)
+
+            if (instruction.OpCode == OpCodes.Ldc_R4)
             {
                 var stackItem = new BuilderStackItem(MiniBCL.FloatType,
                     LLVM.ConstReal(LLVM.FloatTypeInContext(Context.ContextRef), (double) instruction.Operand));
@@ -210,7 +225,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldc_R4] -> Pushed {stackItem.ValRef.Value} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldc_R8)
+
+            if (instruction.OpCode == OpCodes.Ldc_R8)
             {
                 var stackItem = new BuilderStackItem(MiniBCL.DoubleType,
                     LLVM.ConstReal(LLVM.DoubleTypeInContext(Context.ContextRef),
@@ -219,7 +235,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldc_R8] -> Pushed {stackItem.ValRef.Value} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldnull)
+
+            if (instruction.OpCode == OpCodes.Ldnull)
             {
                 var stackItem = new BuilderStackItem(MiniBCL.Int64Type,
                     LLVM.ConstNull(LLVM.PointerType(LLVM.Int8Type(), 0)));
@@ -227,7 +244,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldnull] -> Pushed {stackItem.ValRef.Value} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldftn)
+
+            if (instruction.OpCode == OpCodes.Ldftn)
             {
                 var operand = (MethodDefinition) instruction.Operand;
                 var symbol = SymbolHelper.GetCSToLLVMSymbolName(operand);
@@ -241,7 +259,8 @@ namespace PearlCLR.JIT
                 Context.CLRLogger.Debug($"[Ldftn {stackItem.Type}] -> Pushed {stackItem.ValRef.Value} to Stack");
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Ldstr)
+
+            if (instruction.OpCode == OpCodes.Ldstr)
             {
                 var val = (string) instruction.Operand;
                 var ldstr = LLVM.BuildGlobalStringPtr(funcContext.Builder, val, "");

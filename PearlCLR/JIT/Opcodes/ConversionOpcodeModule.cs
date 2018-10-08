@@ -10,19 +10,21 @@ namespace PearlCLR.JIT
         {
         }
 
-        public override bool CanRun(Instruction instruction) =>
-            instruction.OpCode == OpCodes.Conv_I ||
-            instruction.OpCode == OpCodes.Conv_U1 ||
-            instruction.OpCode == OpCodes.Conv_U2 ||
-            instruction.OpCode == OpCodes.Conv_U4 ||
-            instruction.OpCode == OpCodes.Conv_U8 ||
-            instruction.OpCode == OpCodes.Conv_I1 ||
-            instruction.OpCode == OpCodes.Conv_I2 ||
-            instruction.OpCode == OpCodes.Conv_I4 ||
-            instruction.OpCode == OpCodes.Conv_I8 ||
-            instruction.OpCode == OpCodes.Conv_R4 ||
-            instruction.OpCode == OpCodes.Conv_R8;
-        
+        public override bool CanRun(Instruction instruction)
+        {
+            return instruction.OpCode == OpCodes.Conv_I ||
+                   instruction.OpCode == OpCodes.Conv_U1 ||
+                   instruction.OpCode == OpCodes.Conv_U2 ||
+                   instruction.OpCode == OpCodes.Conv_U4 ||
+                   instruction.OpCode == OpCodes.Conv_U8 ||
+                   instruction.OpCode == OpCodes.Conv_I1 ||
+                   instruction.OpCode == OpCodes.Conv_I2 ||
+                   instruction.OpCode == OpCodes.Conv_I4 ||
+                   instruction.OpCode == OpCodes.Conv_I8 ||
+                   instruction.OpCode == OpCodes.Conv_R4 ||
+                   instruction.OpCode == OpCodes.Conv_R8;
+        }
+
 
         public override BuildResult Build(Instruction instruction, FunctionContext funcContext)
         {
@@ -51,9 +53,11 @@ namespace PearlCLR.JIT
                     throw new Exception(
                         "INTEGER 8 BYTES CONVERSION IS NOT SUPPORTED");
                 }
+
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Conv_U1)
+
+            if (instruction.OpCode == OpCodes.Conv_U1)
             {
                 var value = funcContext.BuilderStack.Pop();
                 if (MiniBCL.IsTypeARealNumber(value.Type))
@@ -77,9 +81,11 @@ namespace PearlCLR.JIT
                     throw new Exception(
                         "UNSIGNED INTEGER 1 BYTES CONVERSION IS NOT SUPPORTED");
                 }
+
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Conv_U2)
+
+            if (instruction.OpCode == OpCodes.Conv_U2)
             {
                 var value = funcContext.BuilderStack.Pop();
                 if (MiniBCL.IsTypeARealNumber(value.Type))
@@ -103,9 +109,11 @@ namespace PearlCLR.JIT
                     throw new Exception(
                         "UNSIGNED INTEGER 2 BYTES CONVERSION IS NOT SUPPORTED");
                 }
+
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Conv_U4)
+
+            if (instruction.OpCode == OpCodes.Conv_U4)
             {
                 var value = funcContext.BuilderStack.Pop();
                 if (MiniBCL.IsTypeARealNumber(value.Type))
@@ -129,9 +137,11 @@ namespace PearlCLR.JIT
                     throw new Exception(
                         "UNSIGNED INTEGER 4 BYTES CONVERSION IS NOT SUPPORTED");
                 }
+
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Conv_U8)
+
+            if (instruction.OpCode == OpCodes.Conv_U8)
             {
                 var value = funcContext.BuilderStack.Pop();
                 if (MiniBCL.IsTypeARealNumber(value.Type))
@@ -155,9 +165,11 @@ namespace PearlCLR.JIT
                     throw new Exception(
                         "UNSIGNED INTEGER 8 BYTES CONVERSION IS NOT SUPPORTED");
                 }
+
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Conv_I1)
+
+            if (instruction.OpCode == OpCodes.Conv_I1)
             {
                 var value = funcContext.BuilderStack.Pop();
                 if (MiniBCL.IsTypeARealNumber(value.Type))
@@ -181,9 +193,11 @@ namespace PearlCLR.JIT
                     throw new Exception(
                         "INTEGER 1 BYTES CONVERSION IS NOT SUPPORTED");
                 }
+
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Conv_I2)
+
+            if (instruction.OpCode == OpCodes.Conv_I2)
             {
                 var value = funcContext.BuilderStack.Pop();
                 if (MiniBCL.IsTypeARealNumber(value.Type))
@@ -207,9 +221,11 @@ namespace PearlCLR.JIT
                     throw new Exception(
                         "INTEGER 2 BYTES CONVERSION IS NOT SUPPORTED");
                 }
+
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Conv_I4)
+
+            if (instruction.OpCode == OpCodes.Conv_I4)
             {
                 var value = funcContext.BuilderStack.Pop();
                 if (value.Type.IsPointer)
@@ -241,9 +257,11 @@ namespace PearlCLR.JIT
                     throw new Exception(
                         "INTEGER 4 BYTES CONVERSION IS NOT SUPPORTED");
                 }
+
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Conv_I8)
+
+            if (instruction.OpCode == OpCodes.Conv_I8)
             {
                 var value = funcContext.BuilderStack.Pop();
                 if (MiniBCL.IsTypeARealNumber(value.Type))
@@ -267,9 +285,11 @@ namespace PearlCLR.JIT
                     throw new Exception(
                         "INTEGER 8 BYTES CONVERSION IS NOT SUPPORTED");
                 }
+
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Conv_R4)
+
+            if (instruction.OpCode == OpCodes.Conv_R4)
             {
                 var value = funcContext.BuilderStack.Pop();
                 if (MiniBCL.IsTypeAnInteger(value.Type))
@@ -297,9 +317,11 @@ namespace PearlCLR.JIT
                     throw new Exception(
                         "REAL 4 BYTES CONVERSION IS NOT SUPPORTED");
                 }
+
                 return new BuildResult(true);
             }
-            else if (instruction.OpCode == OpCodes.Conv_R8)
+
+            if (instruction.OpCode == OpCodes.Conv_R8)
             {
                 var value = funcContext.BuilderStack.Pop();
                 if (MiniBCL.IsTypeAnInteger(value.Type))
@@ -327,11 +349,11 @@ namespace PearlCLR.JIT
                     throw new Exception(
                         "REAL 8 BYTES CONVERSION IS NOT SUPPORTED");
                 }
+
                 return new BuildResult(true);
             }
 
             return new BuildResult(false);
         }
-
     }
 }
