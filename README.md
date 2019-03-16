@@ -1,33 +1,30 @@
 # PearlCLR
-Unmanaged/Managed CLR Project in C#
+An unmanaged/Managed CLR project in C#
 
-Discord Server Invite: https://discord.gg/e9BgByh
-
-Created by Tyler Crandall
+[![Chat on Discord](https://img.shields.io/badge/chat-on%20discord-7289DA.svg)](https://discord.gg/e9BgByh)
 
 Supports:
 
-1. Basic structs/classes
-2. Integer/Float Conversions and Operations
-3. Console.WriteLine (treated as Printf for simplicity)
-4. Support Branching such as For Loop, While Loop, If Else and so forth.
+* Basic structs/classes
+* Integer/Float Conversions and Operations
+* Console.WriteLine (treated as Printf for simplicity)
+* Support Branching such as For Loop, While Loop, If Else and so forth.
 
 Does not support:
 
-1. Generic (Work in progress)
-2. Decimal Type (Currently using Floating Point 128 bit under IEEE 754 spec)
-3. Object Type and it's metadata
+* Generic (Work in progress)
+* Decimal Type (Currently using Floating Point 128 bit under IEEE 754 spec)
+* Object Type and it's metadata
 
-# Project Roots:
+# Projects:
 
 ## PearlCLR
 
-The CLR Project itself which includes runtime/jit compilation code.
+The CLR project itself which includes runtime/JIT compilation code.
 
 ## PearlCLRExtensions
 
-A project containing variety of functions and PearlCLR specific features that include, but not limited to, manual memory management and
-type resolution and metadata management.
+A project containing variety of functions and PearlCLR specific features including, but not limited to, manual memory management and type resolution and metadata management.
 
 ## Demo
 
@@ -35,19 +32,19 @@ A scratchpad project written in C# that imports PearlCLRExtensions project for P
 
 ## PearlCLRRunner
 
-A project that simply import PearlCLR and Demo and run PearlCLR on compiled Demo library.
+A project that simply imports PearlCLR and Demo and runs PearlCLR on the compiled Demo library.
 
-# How it work?
+# How does it work?
 
-The PearlCLR project simply takes in compiled .Net assembly and translate MSIL to LLVM IR. Though it haven't be implemented yet, the intended end-goal is to embed JIT Compiler/CLR with the compiled LLVM IR as a separate LLVM bitcode file to support a variety of features that can't be compiled ahead of time.
+The PearlCLR project simply takes a compiled .NET assembly and translates MSIL to LLVM IR. Though it hasn't be implemented yet, the intended end-goal is to embed a JIT Compiler/CLR with the compiled LLVM IR as a separate LLVM bytecode file to support a variety of features that can't be compiled ahead of time.
 
-The PearlCLR is currently bootstrap from Dotnet Core and will eventually compile itself and embed itself with the compiled application. The PearlCLR is more or less intended to be a "Low-level" CLR that effectively brings C# down to the low level like C/C++ and Rust. Some of those can already be demonstrated in Demo project.
+PearlCLR currently bootstraps from .NET Core and will eventually embed itself into the compiled application. PearlCLR is intended to be a "Low-Level" CLR that effectively brings C# down to the levels of C/C++ and Rust; some of which are already be demonstrated in the Demo project.
 
 # Frequently Asked Questions:
 
-## Why do I get an error, "System.AccessViolationException: Attempted to read or write protected memory. This is often an indication that other memory is corrupt" on Windows?
+## Why do I get an AccessViolationException on Windows?
 
-This is usually a problem with LLVMSharp library, it is currently on the roadmap for PearCLR development to fix upstream to LLVMSharp or to create an alternative binding to LLVM-C API. LLVMSharp is known to work well on Linux platform.
+This is usually a problem with LLVMSharp; it's currently on the roadmap for PearCLR development to fix this issue upstream or to create an alternative binding to LLVM-C API. LLVMSharp is known to work well on Linux platforms.
 
 ## Why not contribute to LLILC instead?
 
@@ -58,6 +55,6 @@ There are two reasons:
 
 ## It doesn't create an executable when I run it
 
-It doesn't, at least not yet, it however does provide MainModule.bc which is a LLVM IR bitcode file that you can use in place of C/C++ source files in clang compilation. This however requires that you install the LLVM and Clang toolchain which can be found in https://llvm.org/
+It doesn't, at least not yet. It does, however, provide MainModule.bc which is a LLVM IR bytecode file that you can use in place of C/C++ source files for `clang` compilation. Note that this does require the LLVM and Clang toolchain which can be found at https://llvm.org/
 
-`clang -oProgram.exe MainModule.bc` would produce Program.exe from the provided LLVM IR.
+`clang -o Program.exe MainModule.bc` would produce Program.exe from the provided LLVM IR.
