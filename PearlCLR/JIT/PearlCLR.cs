@@ -31,6 +31,12 @@ namespace PearlCLR.JIT
             };
             _context.ContextRef = LLVM.GetModuleContext(_context.ModuleRef);
             _context.TypeResolver = new LLVMTypeResolver(_context);
+            _options = new JITCompilerOptions
+            {
+                MetadataFixedLength = 32, CLRStringMode = StringMode.CString,
+                MetadataTypeHandlingModeOption = MetadataTypeHandlingMode.Full_Fixed
+            };
+            _context.Options = _options;
         }
 
         /// <summary>
@@ -38,7 +44,7 @@ namespace PearlCLR.JIT
         /// </summary>
         private AssemblyDefinition assembly { get; }
 
-        private JITCompilerOptions _options { get; } = new JITCompilerOptions();
+        private JITCompilerOptions _options { get; }
         private JITContext _context { get; }
 
         private void LoadOpcodeHandlerModules()
@@ -110,8 +116,7 @@ namespace PearlCLR.JIT
             _context.CLRLogger.Info("Running Process Main Module");
             ProcessWork("Adding Critical Objects", AddBCLObjects);
             ProcessWork("Process all exported types", ProcessAllExportedTypes);
-            ProcessWork("Process all functions", LoadOpcodeHandlerModules,
-                () => ProcessFunction(assembly.MainModule.EntryPoint));
+            ProcessWork("Process all functions", LoadOpcodeHandlerModules, () => ProcessFunction(assembly.MainModule.EntryPoint));
             ProcessWork("Link in JIT", LinkJIT);
             ProcessWork("Verify LLVM emitted codes", Verify);
             ProcessWork("Optimize LLVM emitted codes", Optimize);
@@ -126,6 +131,7 @@ namespace PearlCLR.JIT
             var passManager = LLVM.CreatePassManager();
             LLVM.AddVerifierPass(passManager);
             LLVM.RunPassManager(passManager, _context.ModuleRef);
+            LLVM.DisposePassManager(passManager);
         }
 
 

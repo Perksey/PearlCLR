@@ -2,15 +2,18 @@
 
 internal class Program
 {
-    private static void Main()
+    static void Main()
     {
-        var ptr = 5;
-        if (ptr > 3)
-            ptr += 5;
-        var Val = 5;
-        if (Val < 3)
-            Val += 5;
-        Val += ptr;
-        Console.WriteLine("%i\n", Val);
+        BadStuff();
+        Console.WriteLine("Hello!");
+    }
+
+    static unsafe void BadStuff()
+    {
+        const string s = "Hello!";
+        fixed (char* c = s)
+        {
+            c[2] = 'n';
+        }
     }
 }

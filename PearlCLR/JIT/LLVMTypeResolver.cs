@@ -29,8 +29,9 @@ namespace PearlCLR.JIT
                 {TypeReferenceName.UInt64, LLVM.Int64Type},
                 {TypeReferenceName.Float, LLVM.FloatType},
                 {TypeReferenceName.Double, LLVM.DoubleType},
-                //TODO, StopbeinglazywithFP128Type
-                {TypeReferenceName.Decimal, LLVM.FP128Type}
+                //TODO, on second thought... let's forget about .Net Decimal
+                {TypeReferenceName.Decimal, LLVM.FP128Type},
+                {TypeReferenceName.Char, LLVM.Int8Type}
             };
         }
 
@@ -68,6 +69,19 @@ namespace PearlCLR.JIT
 
             if (Context.FullSymbolToTypeRef.TryGetValue(def.FullName, out var val))
                 return def.Resolve().IsClass ? LLVM.PointerType(val.StructTypeRef, 0) : val.StructTypeRef;
+
+            if (def.FullName == "System.String")
+            {
+                if (Context.Options.CLRStringMode == StringMode.CString)
+                {
+                    return LLVM.PointerType(LLVM.Int8Type(), 0);
+                }
+                else
+                {
+                    // TODO: Add Meta String
+                    throw new NotSupportedException("Not supported");
+                }
+            }
 
             throw new NotSupportedException($"Unhandled Type. {def.FullName} {def.DeclaringType}");
         }
@@ -135,6 +149,7 @@ namespace PearlCLR.JIT
             public const string Float = "System.Float";
             public const string Double = "System.Double";
             public const string Decimal = "System.Decimal";
+            public const string Char = "System.Char";
         }
     }
 }

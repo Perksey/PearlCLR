@@ -13,6 +13,12 @@
     <PackageReference Include="PeNet" Version="0.7.0" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Runtime" />
+    <Compile Remove="Runtime\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Remove="Runtime\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Remove="Runtime\**" />
   </ItemGroup>
 </Project>
