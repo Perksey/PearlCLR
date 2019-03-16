@@ -61,3 +61,48 @@ There are two reasons:
 It doesn't, at least not yet, it however does provide MainModule.bc which is a LLVM IR bitcode file that you can use in place of C/C++ source files in clang compilation. This however requires that you install the LLVM and Clang toolchain which can be found in https://llvm.org/
 
 `clang -oProgram.exe MainModule.bc` would produce Program.exe from the provided LLVM IR.
+
+## SUPPORTED CIL OPCODES:
+
+| Functional/Support Flag | Description |
+--------------------------|--------------
+| C | CIL OpCode is fully supported and completed |
+| w | CIL OpCode partially supported |
+| p | CIL OpCode is not functional, but planned to be supported |
+| n | CIL OpCode is not support and won't be supported |
+
+| CIL Opcode | Compatibility/Support Flag |
+-------------|-----------------------------
+| Nop | C |
+| Initobj | p |
+| Dup | C |
+| Newobj | p |
+| Callvirt | p |
+| Call | p |
+| Box | p |
+| Br | C |
+| Br_S | C |
+| Beq | C |
+| Beq_S | C |
+| Bge | C |
+| Bge_S | C |
+| Bge_Un | C |
+| Bge_Un_S | C |
+| Bgt | C |
+| Bgt_S | C |
+| Bgt_Un | C |
+| Bgt_Un_S | C |
+| Ble | C |
+| Ble_S | C |
+| Ble_Un | C |
+| Ble_Un_S | C |
+| Blt | C |
+| Blt_S | C |
+| Blt_Un | C |
+| Blt_Un_S | C |
+| Bne_Un | C |
+| Bne_Un_S | C |
+| Brfalse | C |
+| Brfalse_S | C |
+| Brtrue | C |
+| Brtrue_S | C |
