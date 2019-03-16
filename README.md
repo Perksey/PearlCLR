@@ -1,7 +1,7 @@
 # PearlCLR
 Unmanaged/Managed CLR Project in C#
 
-Discord Server Invite: https://discord.gg/Ac5dPVn
+Discord Server Invite: https://discord.gg/e9BgByh
 
 Created by Tyler Crandall
 
