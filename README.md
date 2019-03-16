@@ -64,45 +64,38 @@ It doesn't, at least not yet, it however does provide MainModule.bc which is a L
 
 ## SUPPORTED CIL OPCODES:
 
-| Functional/Support Flag | Description |
---------------------------|--------------
-| C | CIL OpCode is fully supported and completed |
-| w | CIL OpCode partially supported |
-| p | CIL OpCode is not functional, but planned to be supported |
-| n | CIL OpCode is not support and won't be supported |
-
 | CIL Opcode | Compatibility/Support Flag |
 -------------|-----------------------------
-| Nop | C |
-| Initobj | p |
-| Dup | C |
-| Newobj | p |
-| Callvirt | p |
-| Call | p |
-| Box | p |
-| Br | C |
-| Br_S | C |
-| Beq | C |
-| Beq_S | C |
-| Bge | C |
-| Bge_S | C |
-| Bge_Un | C |
-| Bge_Un_S | C |
-| Bgt | C |
-| Bgt_S | C |
-| Bgt_Un | C |
-| Bgt_Un_S | C |
-| Ble | C |
-| Ble_S | C |
-| Ble_Un | C |
-| Ble_Un_S | C |
-| Blt | C |
-| Blt_S | C |
-| Blt_Un | C |
-| Blt_Un_S | C |
-| Bne_Un | C |
-| Bne_Un_S | C |
-| Brfalse | C |
-| Brfalse_S | C |
-| Brtrue | C |
-| Brtrue_S | C |
+| Nop | ✔️ |
+| Initobj | ❌ |
+| Dup | ✔️ |
+| Newobj | ❌ |
+| Callvirt | ❌ |
+| Call | ❌ |
+| Box | ❌ |
+| Br | ✔️ |
+| Br_S | ✔️ |
+| Beq | ✔️ |
+| Beq_S | ✔️ |
+| Bge | ✔️ |
+| Bge_S | ✔️ |
+| Bge_Un | ✔️ |
+| Bge_Un_S | ✔️ |
+| Bgt | ✔️ |
+| Bgt_S | ✔️ |
+| Bgt_Un | ✔️ |
+| Bgt_Un_S | ✔️ |
+| Ble | ✔️ |
+| Ble_S | ✔️ |
+| Ble_Un | ✔️ |
+| Ble_Un_S | ✔️ |
+| Blt | ✔️ |
+| Blt_S | ✔️ |
+| Blt_Un | ✔️ |
+| Blt_Un_S | ✔️ |
+| Bne_Un | ✔️ |
+| Bne_Un_S | ✔️ |
+| Brfalse | ✔️ |
+| Brfalse_S | ✔️ |
+| Brtrue | ✔️ |
+| Brtrue_S | ✔️ |
